@@ -12,7 +12,8 @@
                 "${fileDirname}\\${fileBasenameNoExtension}.exe",
                 "-mwindows",
                 "-lgdi32",
-                "-luser32"
+                "-luser32",
+                "-lgdiplus"
             ],
             "options": {
                 "cwd": "${fileDirname}"

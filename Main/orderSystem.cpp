@@ -3,8 +3,12 @@
 #include <fstream>
 #include <map>
 #include <string>
+#include <vector>
 #include <algorithm>
 #include <cctype>
+#include <gdiplus.h>
+
+using namespace Gdiplus;
 
 
 #define ID_NEXT_BUTTON 101
@@ -16,9 +20,13 @@
 #define ID_REGISTER_SUBMIT_BUTTON 107
 #define ID_MAIN_MENU_EXIT_BUTTON 108
 #define ID_MAIN_MENU_LOG_OUT_BUTTON 109
+#define ID_PRODUCT_BUTTON_BASE 2000
 
 
 //Function Declarations
+static std::string GetProductImagePath(const std::string& productId);
+static HBITMAP CreateDefaultProductBitmap(const std::string& productName, int width, int height);
+static HBITMAP LoadProductBitmap(const std::string& productId, const std::string& productName);
 LRESULT CALLBACK LandingWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK LoginRegisterWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK LogInWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
@@ -47,11 +55,13 @@ void CreateRegisterPasswordInput(HWND parent, HINSTANCE hInstance);
 void CreateRegisterSubmitButton(HWND parent, HINSTANCE hInstance);
 void CreateLogInForm(HWND parent, HINSTANCE hInstance);
 void CreateRegisterForm(HWND parent, HINSTANCE hInstance);
+void CreateProductGrid(HWND parent, HINSTANCE hInstance);
 void CreateMainMenuExitButton(HWND parent, HINSTANCE hInstance);
 void CreateMainMenuLogOutButton(HWND parent, HINSTANCE hInstance);
 void CreateMainMenuForm(HWND parent, HINSTANCE hInstance);
 void MainMenuExit(HWND hwnd);
 void LoadUsers();
+void LoadProducts();
 std::string ToString(const TCHAR* str);
 
 //Static Variables
@@ -64,12 +74,19 @@ static HWND gLoginUsernameEdit = nullptr;
 static HWND gLoginPasswordEdit = nullptr;
 static HWND gRegisterUsernameEdit = nullptr;
 static HWND gRegisterPasswordEdit = nullptr;
+static int gProductScrollPos = 0;
+static ULONG_PTR gGdiplusToken = 0;
 
 //Global Variables
 std::map<std::string, std::string> userMap;
+std::vector<std::string> gProductNames;
+std::vector<std::string> gProductIds;
 std::string currentUser;
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR LpCmdLine, int nCmdShow){
+    GdiplusStartupInput gdiplusStartupInput;
+    GdiplusStartup(&gGdiplusToken, &gdiplusStartupInput, nullptr);
+
     LoadUsers();
     int screenW = GetSystemMetrics(SM_CXSCREEN);
     int screenH = GetSystemMetrics(SM_CYSCREEN);
@@ -127,8 +144,82 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR LpCmdLine
     }
 
     DeleteObject(gBackgroundBrush);
+    GdiplusShutdown(gGdiplusToken);
     return 0;
 }
+
+
+static std::string GetProductImagePath(const std::string& productId) {
+    std::string cleanedId = productId;
+    if (cleanedId.empty()) {
+        cleanedId = "001";
+    }
+    cleanedId.erase(std::remove_if(cleanedId.begin(), cleanedId.end(), [](unsigned char ch) { return !std::isdigit(ch); }), cleanedId.end());
+    if (cleanedId.empty()) {
+        cleanedId = "001";
+    }
+
+    std::string path = "Product Informations/" + cleanedId + ".png";
+    std::ifstream file(path.c_str());
+    if (!file) {
+        path = "Product Informations/default.png";
+    }
+    return path;
+}
+
+static HBITMAP CreateDefaultProductBitmap(const std::string& productName, int width, int height) {
+    HDC screenDC = GetDC(nullptr);
+    HDC memDC = CreateCompatibleDC(screenDC);
+    HBITMAP bitmap = CreateCompatibleBitmap(screenDC, width, height);
+    HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, bitmap);
+
+    HBRUSH bgBrush = CreateSolidBrush(RGB(255, 224, 230));
+    HBRUSH accentBrush = CreateSolidBrush(RGB(255, 192, 203));
+    HPEN borderPen = CreatePen(PS_SOLID, 2, RGB(168, 85, 110));
+    HGDIOBJ oldBrush = SelectObject(memDC, bgBrush);
+    HGDIOBJ oldPen = SelectObject(memDC, borderPen);
+
+    Rectangle(memDC, 0, 0, width, height);
+    SelectObject(memDC, accentBrush);
+    Rectangle(memDC, 5, 5, width - 5, height - 5);
+    SelectObject(memDC, oldBrush);
+    SelectObject(memDC, oldPen);
+
+    SetBkMode(memDC, TRANSPARENT);
+    SetTextColor(memDC, RGB(100, 40, 60));
+    HFONT font = CreateFontA(18, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
+    HFONT oldFont = (HFONT)SelectObject(memDC, font);
+    TextOutA(memDC, 20, 32, productName.c_str(), (int)productName.length());
+    SelectObject(memDC, oldFont);
+    DeleteObject(font);
+
+    DeleteObject(bgBrush);
+    DeleteObject(accentBrush);
+    DeleteObject(borderPen);
+    SelectObject(memDC, oldBitmap);
+    DeleteDC(memDC);
+    ReleaseDC(nullptr, screenDC);
+
+    return bitmap;
+}
+
+static HBITMAP LoadProductBitmap(const std::string& productId, const std::string& productName) {
+    std::string path = GetProductImagePath(productId);
+    std::wstring widePath(path.begin(), path.end());
+
+    Gdiplus::Bitmap image(widePath.c_str());
+    if (image.GetLastStatus() == Gdiplus::Ok) {
+        HBITMAP bitmap = nullptr;
+        image.GetHBITMAP(Gdiplus::Color(0, 0, 0, 0), &bitmap);
+        if (bitmap) {
+            return bitmap;
+        }
+    }
+
+    return CreateDefaultProductBitmap(productName, 140, 140);
+}
+
 
 LRESULT CALLBACK LandingWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
     switch(uMsg){
@@ -324,8 +415,77 @@ LRESULT CALLBACK MainMenuWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM 
                 CreateLogInButton(loginRegisterWindow, GetModuleHandle(nullptr));
                 CreateRegisterButton(loginRegisterWindow, GetModuleHandle(nullptr));
                 ShowWindow(loginRegisterWindow, SW_SHOW);
+            } else if (HIWORD(wParam) == BN_CLICKED) {
+                int controlId = LOWORD(wParam);
+                if (controlId >= ID_PRODUCT_BUTTON_BASE && controlId < ID_PRODUCT_BUTTON_BASE + (int)gProductNames.size()) {
+                    int productIndex = controlId - ID_PRODUCT_BUTTON_BASE;
+                    std::string productName = gProductNames[productIndex];
+                    std::string details = "Selected flower: " + productName + "\n\nThis is a sample product detail window.";
+                    MessageBoxA(hwnd, details.c_str(), "Flower Details", MB_OK | MB_ICONINFORMATION);
+                }
             }
             return 0;
+
+        case WM_VSCROLL: {
+            int currentPos = gProductScrollPos;
+            int newPos = currentPos;
+            int minPos = 0;
+            int maxPos = 0;
+            GetScrollRange(hwnd, SB_VERT, &minPos, &maxPos);
+
+            switch (LOWORD(wParam)) {
+                case SB_LINEUP:
+                    newPos -= 20;
+                    break;
+                case SB_LINEDOWN:
+                    newPos += 20;
+                    break;
+                case SB_PAGEUP:
+                    newPos -= 80;
+                    break;
+                case SB_PAGEDOWN:
+                    newPos += 80;
+                    break;
+                case SB_THUMBPOSITION:
+                case SB_THUMBTRACK:
+                    newPos = HIWORD(wParam);
+                    break;
+                case SB_TOP:
+                    newPos = minPos;
+                    break;
+                case SB_BOTTOM:
+                    newPos = maxPos;
+                    break;
+            }
+
+            if (newPos < minPos) newPos = minPos;
+            if (newPos > maxPos) newPos = maxPos;
+
+            if (newPos != currentPos) {
+                gProductScrollPos = newPos;
+                SetScrollPos(hwnd, SB_VERT, newPos, TRUE);
+                
+                int boxWidth = 140;
+                int boxHeight = 140;
+                int xStart = 115;
+                int yStart = 70;
+                int xGap = 20;
+                int yGap = 20;
+                int cols = 4;
+                for (size_t i = 0; i < gProductNames.size(); ++i) {
+                    int col = static_cast<int>(i % cols);
+                    int row = static_cast<int>(i / cols);
+                    int x = xStart + col * (boxWidth + xGap);
+                    int y = yStart + row * (boxHeight + yGap) - gProductScrollPos;
+                    HWND button = GetDlgItem(hwnd, ID_PRODUCT_BUTTON_BASE + (int)i);
+                    if (button) {
+                        SetWindowPos(button, nullptr, x, y, boxWidth, boxHeight, SWP_NOZORDER | SWP_NOACTIVATE);
+                    }
+                }
+            }
+            return 0;
+        }
+
         case WM_DESTROY:
             PostQuitMessage(0);
             return 0;
@@ -406,7 +566,7 @@ HWND CreateMainMenuWindow(HINSTANCE hInstance){
         0,
         TEXT("MainMenuPage"),
         TEXT("Main Menu"),
-        WS_OVERLAPPEDWINDOW,
+        WS_OVERLAPPEDWINDOW | WS_VSCROLL,
         gLoginRegisterWindowX,
         gLoginRegisterWindowY,
         800,
@@ -665,13 +825,57 @@ void CreateRegisterForm(HWND parent, HINSTANCE hInstance){
     CreateRegisterSubmitButton(parent, hInstance);
 }
 
+void CreateProductGrid(HWND parent, HINSTANCE hInstance){
+    LoadProducts();
+
+    int boxWidth = 140;
+    int boxHeight = 140;
+    int xStart = 115;
+    int yStart = 70;
+    int xGap = 20;
+    int yGap = 20;
+    int cols = 4;
+    int visibleHeight = 250;
+
+    int rows = (gProductNames.empty() ? 0 : (static_cast<int>(gProductNames.size()) + cols - 1) / cols);
+    int totalHeight = rows * (boxHeight + yGap) + 20;
+    gProductScrollPos = 0;
+    SetScrollRange(parent, SB_VERT, 0, std::max(0, totalHeight - visibleHeight), TRUE);
+    SetScrollPos(parent, SB_VERT, 0, TRUE);
+
+    for (size_t i = 0; i < gProductNames.size(); ++i) {
+        int col = static_cast<int>(i % cols);
+        int row = static_cast<int>(i / cols);
+
+        int x = xStart + col * (boxWidth + xGap);
+        int y = yStart + row * (boxHeight + yGap) - gProductScrollPos;
+
+        HWND button = CreateWindowExA(
+            0,
+            "BUTTON",
+            "",
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON | BS_BITMAP | BS_NOTIFY,
+            x, y, boxWidth, boxHeight,
+            parent,
+            (HMENU)(ID_PRODUCT_BUTTON_BASE + i),
+            hInstance,
+            nullptr
+        );
+
+        if (button) {
+            HBITMAP productBitmap = LoadProductBitmap(gProductIds[i], gProductNames[i]);
+            SendMessage(button, BM_SETIMAGE, (WPARAM)IMAGE_BITMAP, (LPARAM)productBitmap);
+        }
+    }
+}
+
 void CreateMainMenuExitButton(HWND parent, HINSTANCE hInstance){
     CreateWindowEx(
         0,
         TEXT("BUTTON"),
         TEXT("Exit"),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-        10, 10, 80, 30,
+        10, 10, 90, 30,
         parent,
         (HMENU)ID_MAIN_MENU_EXIT_BUTTON,
         hInstance,
@@ -685,7 +889,7 @@ void CreateMainMenuLogOutButton(HWND parent, HINSTANCE hInstance){
         TEXT("BUTTON"),
         TEXT("Log Out"),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-        10, 10, 80, 30,
+        10, 50, 90, 30,
         parent,
         (HMENU)ID_MAIN_MENU_LOG_OUT_BUTTON,
         hInstance,
@@ -700,6 +904,7 @@ void MainMenuExit(HWND hwnd){
 void CreateMainMenuForm(HWND parent, HINSTANCE hInstance){
     CreateMainMenuExitButton(parent, hInstance);
     CreateMainMenuLogOutButton(parent, hInstance);
+    CreateProductGrid(parent, hInstance);
 }
 
 void LoadUsers(){
@@ -719,6 +924,36 @@ void LoadUsers(){
             std::string username = line.substr(0, delimiterPos);
             std::string password = line.substr(delimiterPos + 1);
             userMap[username] = password;
+        }
+    }
+}
+
+void LoadProducts(){
+    gProductNames.clear();
+    gProductIds.clear();
+    std::ifstream file("products.txt");
+    if (!file) {
+        return;
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+        if (line.empty()) {
+            continue;
+        }
+
+        size_t delimiterPos = line.find('|');
+        std::string productName = line;
+        std::string productId = "001";
+
+        if (delimiterPos != std::string::npos) {
+            productName = line.substr(0, delimiterPos);
+            productId = line.substr(delimiterPos + 1);
+        }
+
+        if (!productName.empty()) {
+            gProductNames.push_back(productName);
+            gProductIds.push_back(productId);
         }
     }
 }
