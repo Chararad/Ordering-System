@@ -1,35 +1,121 @@
 //Library Includes
 #include <windows.h>
+#include <fstream>
+#include <map>
+#include <string>
+#include <algorithm>
+#include <cctype>
+
 
 #define ID_NEXT_BUTTON 101
+#define ID_LOGIN_BUTTON 102
+#define ID_REGISTER_BUTTON 103
+#define ID_LOGIN_BACK_BUTTON 104
+#define ID_REGISTER_BACK_BUTTON 105
+#define ID_LOGIN_SUBMIT_BUTTON 106
+#define ID_REGISTER_SUBMIT_BUTTON 107
+#define ID_MAIN_MENU_EXIT_BUTTON 108
+#define ID_MAIN_MENU_LOG_OUT_BUTTON 109
+
 
 //Function Declarations
-LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
-LRESULT CALLBACK SecondWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
-HWND CreateMainWindow(HINSTANCE hInstance);
-HWND CreateSecondWindow(HINSTANCE hInstance);
-void CreateText(HWND parent, HINSTANCE hInstance);
+LRESULT CALLBACK LandingWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+LRESULT CALLBACK LoginRegisterWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+LRESULT CALLBACK LogInWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+LRESULT CALLBACK RegisterWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+LRESULT CALLBACK MainMenuWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+HWND CreateLandingWindow(HINSTANCE hInstance);
+HWND CreateLoginRegisterWindow(HINSTANCE hInstance);
+HWND CreateLogInWindow(HINSTANCE hInstance);
+HWND CreateRegisterWindow(HINSTANCE hInstance);
+HWND CreateMainMenuWindow(HINSTANCE hInstance);
+void CreateTitleText(HWND parent, HINSTANCE hInstance);
 void CreateNextButton(HWND parent, HINSTANCE hInstance);
+void CreateLogInButton(HWND parent, HINSTANCE hInstance);
+void CreateRegisterButton(HWND parent, HINSTANCE hInstance);
+void CreateLogInBackButton(HWND parent, HINSTANCE hInstance);
+void CreateRegisterBackButton(HWND parent, HINSTANCE hInstance);
+void CreateLogInUsernameLabel(HWND parent, HINSTANCE hInstance);
+void CreateLogInPasswordLabel(HWND parent, HINSTANCE hInstance);
+void CreateLogInUsernameInput(HWND parent, HINSTANCE hInstance);
+void CreateLogInPasswordInput(HWND parent, HINSTANCE hInstance);
+void CreateLogInSubmitButton(HWND parent, HINSTANCE hInstance);
+void CreateRegisterUsernameLabel(HWND parent, HINSTANCE hInstance);
+void CreateRegisterPasswordLabel(HWND parent, HINSTANCE hInstance);
+void CreateRegisterUsernameInput(HWND parent, HINSTANCE hInstance);
+void CreateRegisterPasswordInput(HWND parent, HINSTANCE hInstance);
+void CreateRegisterSubmitButton(HWND parent, HINSTANCE hInstance);
+void CreateLogInForm(HWND parent, HINSTANCE hInstance);
+void CreateRegisterForm(HWND parent, HINSTANCE hInstance);
+void CreateMainMenuExitButton(HWND parent, HINSTANCE hInstance);
+void CreateMainMenuLogOutButton(HWND parent, HINSTANCE hInstance);
+void CreateMainMenuForm(HWND parent, HINSTANCE hInstance);
+void MainMenuExit(HWND hwnd);
+void LoadUsers();
+std::string ToString(const TCHAR* str);
 
+//Static Variables
 static HBRUSH gBackgroundBrush = CreateSolidBrush(RGB(255, 192, 203));
+static int gLandingWindowX = 0;
+static int gLandingWindowY = 0;
+static int gLoginRegisterWindowX = 0;
+static int gLoginRegisterWindowY = 0;
+static HWND gLoginUsernameEdit = nullptr;
+static HWND gLoginPasswordEdit = nullptr;
+static HWND gRegisterUsernameEdit = nullptr;
+static HWND gRegisterPasswordEdit = nullptr;
+
+//Global Variables
+std::map<std::string, std::string> userMap;
+std::string currentUser;
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR LpCmdLine, int nCmdShow){
-    WNDCLASS wc = {};
-    wc.lpfnWndProc = WindowProc;
-    wc.hInstance = hInstance;
-    wc.lpszClassName = TEXT("OrderingSystem");
-    wc.hbrBackground = gBackgroundBrush;
-    RegisterClass(&wc);
+    LoadUsers();
+    int screenW = GetSystemMetrics(SM_CXSCREEN);
+    int screenH = GetSystemMetrics(SM_CYSCREEN);
 
-    WNDCLASS secondClass = {};
-    secondClass.lpfnWndProc = SecondWindowProc;
-    secondClass.hInstance = hInstance;
-    secondClass.lpszClassName = TEXT("Login&RegistrationPage");
-    secondClass.hbrBackground = gBackgroundBrush;
-    RegisterClass(&secondClass);
+    gLandingWindowX = (screenW - 800) / 2;
+    gLandingWindowY = (screenH - 600) / 2;
+    gLoginRegisterWindowX = (screenW - 800) / 2;
+    gLoginRegisterWindowY = (screenH - 600) / 2;
 
-    HWND hwnd = CreateMainWindow(hInstance);
-    CreateText(hwnd, hInstance);
+    WNDCLASS lwc = {};
+    lwc.lpfnWndProc = LandingWindowProc;
+    lwc.hInstance = hInstance;
+    lwc.lpszClassName = TEXT("LandingPage");
+    lwc.hbrBackground = gBackgroundBrush;
+    RegisterClass(&lwc);
+
+    WNDCLASS lrwc = {};
+    lrwc.lpfnWndProc = LoginRegisterWindowProc;
+    lrwc.hInstance = hInstance;
+    lrwc.lpszClassName = TEXT("Login&RegistrationPage");
+    lrwc.hbrBackground = gBackgroundBrush;
+    RegisterClass(&lrwc);
+
+    WNDCLASS lwc2 ={};
+    lwc2.lpfnWndProc = LogInWindowProc;
+    lwc2.hInstance = hInstance;
+    lwc2.lpszClassName = TEXT("LoginPage");
+    lwc2.hbrBackground = gBackgroundBrush;
+    RegisterClass(&lwc2);
+
+    WNDCLASS rwc = {};
+    rwc.lpfnWndProc = RegisterWindowProc;
+    rwc.hInstance = hInstance;
+    rwc.lpszClassName = TEXT("RegisterPage");
+    rwc.hbrBackground = gBackgroundBrush;
+    RegisterClass(&rwc);
+
+    WNDCLASS mmwc = {};
+    mmwc.lpfnWndProc = MainMenuWindowProc;
+    mmwc.hInstance = hInstance;
+    mmwc.lpszClassName = TEXT("MainMenuPage");
+    mmwc.hbrBackground = gBackgroundBrush;
+    RegisterClass(&mmwc);
+
+    HWND hwnd = CreateLandingWindow(hInstance);
+    CreateTitleText(hwnd, hInstance);
     CreateNextButton(hwnd, hInstance);
 
     ShowWindow(hwnd, nCmdShow);
@@ -44,7 +130,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR LpCmdLine
     return 0;
 }
 
-LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
+LRESULT CALLBACK LandingWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
     switch(uMsg){
         case WM_ERASEBKGND: {
             HDC hdc = (HDC)wParam;
@@ -64,7 +150,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
         case WM_COMMAND:
             if (LOWORD(wParam) == ID_NEXT_BUTTON && HIWORD(wParam) == BN_CLICKED) {
                 ShowWindow(hwnd, SW_HIDE);
-                HWND nextWindow = CreateSecondWindow(GetModuleHandle(nullptr));
+                HWND nextWindow = CreateLoginRegisterWindow(GetModuleHandle(nullptr));
+                CreateLogInButton(nextWindow, GetModuleHandle(nullptr));
+                CreateRegisterButton(nextWindow, GetModuleHandle(nullptr));
                 ShowWindow(nextWindow, SW_SHOW);
             }
             return 0;
@@ -76,8 +164,24 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
-LRESULT CALLBACK SecondWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
+LRESULT CALLBACK LoginRegisterWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
     switch(uMsg){
+        case WM_COMMAND:
+            if (LOWORD(wParam) == ID_LOGIN_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                ShowWindow(hwnd, SW_HIDE);
+                HWND loginWindow = CreateLogInWindow(GetModuleHandle(nullptr));
+                CreateLogInForm(loginWindow, GetModuleHandle(nullptr));
+                CreateLogInBackButton(loginWindow, GetModuleHandle(nullptr));
+                ShowWindow(loginWindow, SW_SHOW);
+            } else if (LOWORD(wParam) == ID_REGISTER_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                ShowWindow(hwnd, SW_HIDE);
+                HWND registerWindow = CreateRegisterWindow(GetModuleHandle(nullptr));
+                CreateRegisterForm(registerWindow, GetModuleHandle(nullptr));
+                CreateRegisterBackButton(registerWindow, GetModuleHandle(nullptr));
+                ShowWindow(registerWindow, SW_SHOW);
+            }
+            return 0;
+
         case WM_DESTROY:
             PostQuitMessage(0);
             return 0;
@@ -85,14 +189,158 @@ LRESULT CALLBACK SecondWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lP
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
-HWND CreateMainWindow(HINSTANCE hInstance){
+LRESULT CALLBACK LogInWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
+    switch(uMsg){
+        case WM_ERASEBKGND: {
+            HDC hdc = (HDC)wParam;
+            RECT rect;
+            GetClientRect(hwnd, &rect);
+            FillRect(hdc, &rect, gBackgroundBrush);
+            return TRUE;
+        }
+
+        case WM_CTLCOLORSTATIC: {
+            HDC hdc = (HDC)wParam;
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, RGB(80, 30, 50));
+            return (LRESULT)gBackgroundBrush;
+        }
+        case WM_COMMAND:
+            if (LOWORD(wParam) == ID_LOGIN_BACK_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                ShowWindow(hwnd, SW_HIDE);
+                HWND loginRegisterWindow = CreateLoginRegisterWindow(GetModuleHandle(nullptr));
+                CreateLogInButton(loginRegisterWindow, GetModuleHandle(nullptr));
+                CreateRegisterButton(loginRegisterWindow, GetModuleHandle(nullptr));
+                ShowWindow(loginRegisterWindow, SW_SHOW);
+            } else if (LOWORD(wParam) == ID_LOGIN_SUBMIT_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                TCHAR username[128] = {};
+                TCHAR password[128] = {};
+
+                GetWindowText(gLoginUsernameEdit, username, 128);
+                GetWindowText(gLoginPasswordEdit, password, 128);
+
+                if (username[0] == '\0' || password[0] == '\0') {
+                    MessageBox(hwnd, TEXT("Please enter username and password."), TEXT("Login"), MB_OK);
+                }
+                else {
+                    std::string usernameStr = ToString(username);
+                    std::string passwordStr = ToString(password);
+
+                    auto it = userMap.find(usernameStr);
+                    if (it != userMap.end() && it->second == passwordStr) {
+                        ShowWindow(hwnd, SW_HIDE);
+                        HWND mainMenuWindow = CreateMainMenuWindow(GetModuleHandle(nullptr));
+                        CreateMainMenuForm(mainMenuWindow, GetModuleHandle(nullptr));
+                        ShowWindow(mainMenuWindow, SW_SHOW);
+                        currentUser = usernameStr;
+                    } else {
+                        MessageBox(hwnd, TEXT("Invalid username or password."), TEXT("Login"), MB_OK);
+                    }
+                }
+            }
+            return 0;
+
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
+    }
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+LRESULT CALLBACK RegisterWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
+    switch(uMsg){
+        case WM_ERASEBKGND: {
+            HDC hdc = (HDC)wParam;
+            RECT rect;
+            GetClientRect(hwnd, &rect);
+            FillRect(hdc, &rect, gBackgroundBrush);
+            return TRUE;
+        }
+
+        case WM_CTLCOLORSTATIC: {
+            HDC hdc = (HDC)wParam;
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, RGB(80, 30, 50));
+            return (LRESULT)gBackgroundBrush;
+        }
+
+        case WM_COMMAND:
+            if (LOWORD(wParam) == ID_REGISTER_BACK_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                ShowWindow(hwnd, SW_HIDE);
+                HWND loginRegisterWindow = CreateLoginRegisterWindow(GetModuleHandle(nullptr));
+                CreateLogInButton(loginRegisterWindow, GetModuleHandle(nullptr));
+                CreateRegisterButton(loginRegisterWindow, GetModuleHandle(nullptr));
+                ShowWindow(loginRegisterWindow, SW_SHOW);
+            } else if (LOWORD(wParam) == ID_REGISTER_SUBMIT_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                TCHAR username[128] = {};
+                TCHAR password[128] = {};
+
+                GetWindowText(gRegisterUsernameEdit, username, 128);
+                GetWindowText(gRegisterPasswordEdit, password, 128);
+
+                if (username[0] == '\0' || password[0] == '\0') {
+                    MessageBox(hwnd, TEXT("Please enter username and password."), TEXT("Register"), MB_OK);
+                } else {
+                    std::string usernameStr = ToString(username);
+                    std::string passwordStr = ToString(password);
+
+                    if (userMap.find(usernameStr) != userMap.end()) {
+                        MessageBox(hwnd, TEXT("Username already exists."), TEXT("Register"), MB_OK);
+                    } else {
+                        userMap[usernameStr] = passwordStr;
+
+                        std::ofstream file("users&passwords.txt", std::ios::app);
+                        if (file) {
+                            file << usernameStr << "|" << passwordStr << "\n";
+                            file.close();
+                            ShowWindow(hwnd, SW_HIDE);
+                            HWND mainMenuWindow = CreateMainMenuWindow(GetModuleHandle(nullptr)); 
+                            CreateMainMenuForm(mainMenuWindow, GetModuleHandle(nullptr));
+                            ShowWindow(mainMenuWindow, SW_SHOW);
+                            currentUser = usernameStr;
+                        } else {
+                            MessageBox(hwnd, TEXT("Error saving user data."), TEXT("Register"), MB_OK);
+                        }
+                    }
+                }
+            }
+            return 0;
+
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
+    }
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+LRESULT CALLBACK MainMenuWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
+    switch(uMsg){
+        case WM_COMMAND:
+            if (LOWORD(wParam) == ID_MAIN_MENU_EXIT_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                MainMenuExit(hwnd);
+            } else if (LOWORD(wParam) == ID_MAIN_MENU_LOG_OUT_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                ShowWindow(hwnd, SW_HIDE);
+                HWND loginRegisterWindow = CreateLoginRegisterWindow(GetModuleHandle(nullptr));
+                CreateLogInButton(loginRegisterWindow, GetModuleHandle(nullptr));
+                CreateRegisterButton(loginRegisterWindow, GetModuleHandle(nullptr));
+                ShowWindow(loginRegisterWindow, SW_SHOW);
+            }
+            return 0;
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
+    }
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+HWND CreateLandingWindow(HINSTANCE hInstance){
     return CreateWindowEx(
         0,
-        TEXT("OrderingSystem"),
+        TEXT("LandingPage"),
         TEXT("FLOWER SHOP ORDERING SYSTEM"),
         WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
+        gLandingWindowX,
+        gLandingWindowY,
         800,
         600,
         nullptr,
@@ -102,16 +350,16 @@ HWND CreateMainWindow(HINSTANCE hInstance){
     );
 }
 
-HWND CreateSecondWindow(HINSTANCE hInstance){
+HWND CreateLoginRegisterWindow(HINSTANCE hInstance){
     return CreateWindowEx(
         0,
         TEXT("Login&RegistrationPage"),
         TEXT("Login and Registration"),
         WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        700,
-        500,
+        gLoginRegisterWindowX,
+        gLoginRegisterWindowY,
+        800,
+        600,
         nullptr,
         nullptr,
         hInstance,
@@ -119,7 +367,58 @@ HWND CreateSecondWindow(HINSTANCE hInstance){
     );
 }
 
-void CreateText(HWND parent, HINSTANCE hInstance){
+HWND CreateLogInWindow(HINSTANCE hInstance){
+    return CreateWindowEx(
+        0,
+        TEXT("LoginPage"),
+        TEXT("Log In"),
+        WS_OVERLAPPEDWINDOW,
+        gLoginRegisterWindowX,
+        gLoginRegisterWindowY,
+        800,
+        600,
+        nullptr,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+}
+
+HWND CreateRegisterWindow(HINSTANCE hInstance){
+    return CreateWindowEx(
+        0,
+        TEXT("RegisterPage"),
+        TEXT("Register"),
+        WS_OVERLAPPEDWINDOW,
+        gLoginRegisterWindowX,
+        gLoginRegisterWindowY,
+        800,
+        600,
+        nullptr,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+}
+
+HWND CreateMainMenuWindow(HINSTANCE hInstance){
+    return CreateWindowEx(
+        0,
+        TEXT("MainMenuPage"),
+        TEXT("Main Menu"),
+        WS_OVERLAPPEDWINDOW,
+        gLoginRegisterWindowX,
+        gLoginRegisterWindowY,
+        800,
+        600,
+        nullptr,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateTitleText(HWND parent, HINSTANCE hInstance){
     HWND label = CreateWindowEx(
         0,
         TEXT("STATIC"),
@@ -152,4 +451,286 @@ void CreateNextButton(HWND parent, HINSTANCE hInstance){
         hInstance,
         nullptr
     );
+}
+
+void CreateLogInButton(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Log In"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        330, 250, 120, 40,
+        parent,
+        (HMENU)ID_LOGIN_BUTTON,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateRegisterButton(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0, 
+        TEXT("BUTTON"),
+        TEXT("Register"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        330, 300, 120, 40, 
+        parent,
+        (HMENU)ID_REGISTER_BUTTON,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateLogInBackButton(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Back"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        10, 10, 80, 30,
+        parent,
+        (HMENU)ID_LOGIN_BACK_BUTTON,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateRegisterBackButton(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Back"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        10, 10, 80, 30,
+        parent,
+        (HMENU)ID_REGISTER_BACK_BUTTON,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateLogInUsernameLabel(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("STATIC"),
+        TEXT("Username:"),
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        200, 150, 100, 30,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateLogInPasswordLabel(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("STATIC"),
+        TEXT("Password:"),
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        200, 200, 100, 30,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateLogInUsernameInput(HWND parent, HINSTANCE hInstance){
+    gLoginUsernameEdit = CreateWindowEx(
+        0,
+        TEXT("EDIT"),
+        TEXT(""),
+        WS_CHILD | WS_VISIBLE | WS_BORDER | ES_LEFT,
+        300, 150, 200, 30,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateLogInPasswordInput(HWND parent, HINSTANCE hInstance){
+    gLoginPasswordEdit = CreateWindowEx(
+        0,
+        TEXT("EDIT"),
+        TEXT(""),
+        WS_CHILD | WS_VISIBLE | WS_BORDER | ES_LEFT | ES_PASSWORD,
+        300, 200, 200, 30,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateLogInSubmitButton(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Submit"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        330, 250, 120, 40,
+        parent,
+        (HMENU)ID_LOGIN_SUBMIT_BUTTON,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateRegisterUsernameLabel(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("STATIC"),
+        TEXT("Username:"),
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        200, 150, 100, 30,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateRegisterPasswordLabel(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("STATIC"),
+        TEXT("Password:"),
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        200, 200, 100, 30,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateRegisterUsernameInput(HWND parent, HINSTANCE hInstance){
+    gRegisterUsernameEdit = CreateWindowEx(
+        0,
+        TEXT("EDIT"),
+        TEXT(""),
+        WS_CHILD | WS_VISIBLE | WS_BORDER | ES_LEFT,
+        300, 150, 200, 30,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateRegisterPasswordInput(HWND parent, HINSTANCE hInstance){
+    gRegisterPasswordEdit = CreateWindowEx(
+        0,
+        TEXT("EDIT"),
+        TEXT(""),
+        WS_CHILD | WS_VISIBLE | WS_BORDER | ES_LEFT | ES_PASSWORD,
+        300, 200, 200, 30,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateRegisterSubmitButton(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Submit"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        330, 250, 120, 40,
+        parent,
+        (HMENU)ID_REGISTER_SUBMIT_BUTTON,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateLogInForm(HWND parent, HINSTANCE hInstance){
+    CreateLogInUsernameLabel(parent, hInstance);
+    CreateLogInPasswordLabel(parent, hInstance);
+    CreateLogInUsernameInput(parent, hInstance);
+    CreateLogInPasswordInput(parent, hInstance);
+    CreateLogInSubmitButton(parent, hInstance);
+}
+
+void CreateRegisterForm(HWND parent, HINSTANCE hInstance){
+    CreateRegisterUsernameLabel(parent, hInstance);
+    CreateRegisterPasswordLabel(parent, hInstance);
+    CreateRegisterUsernameInput(parent, hInstance);
+    CreateRegisterPasswordInput(parent, hInstance);
+    CreateRegisterSubmitButton(parent, hInstance);
+}
+
+void CreateMainMenuExitButton(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Exit"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        10, 10, 80, 30,
+        parent,
+        (HMENU)ID_MAIN_MENU_EXIT_BUTTON,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateMainMenuLogOutButton(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Log Out"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        10, 10, 80, 30,
+        parent,
+        (HMENU)ID_MAIN_MENU_LOG_OUT_BUTTON,
+        hInstance,
+        nullptr
+    );
+}
+
+void MainMenuExit(HWND hwnd){
+    PostQuitMessage(0);
+}
+
+void CreateMainMenuForm(HWND parent, HINSTANCE hInstance){
+    CreateMainMenuExitButton(parent, hInstance);
+    CreateMainMenuLogOutButton(parent, hInstance);
+}
+
+void LoadUsers(){
+    userMap.clear();
+    std::ifstream file("users&passwords.txt");
+    if(!file){
+        std::ofstream createFile("users&passwords.txt");
+        createFile.close();
+    }
+    while(file){
+        std::string line;
+        std::getline(file, line);
+        if(line.empty()) continue;
+
+        size_t delimiterPos = line.find('|');
+        if(delimiterPos != std::string::npos){
+            std::string username = line.substr(0, delimiterPos);
+            std::string password = line.substr(delimiterPos + 1);
+            userMap[username] = password;
+        }
+    }
+}
+
+std::string ToString(const TCHAR* str){
+    std::string result;
+    if(!str) return result;
+    int length = 0;
+    while(str[length] != '\0') ++length;
+    result.assign(length, '\0');
+    for(int i = 0; i < length; ++i){
+        result[i] = static_cast<char>(str[i]);
+    }
+    return result;
 }
