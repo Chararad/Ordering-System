@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <gdiplus.h>
+#include <ctime>
 
 using namespace Gdiplus;
 
@@ -26,6 +27,8 @@ using namespace Gdiplus;
 #define ID_MORE_PROFILE_BUTTON 113
 #define ID_MORE_TRANSACTION_HISTORY_BUTTON 114
 #define ID_MORE_BACK_BUTTON 115
+#define ID_PROFILE_IMAGE 116
+#define ID_PROFILE_BACK_BUTTON 117
 #define ID_PRODUCT_BUTTON_BASE 2000
 #define WM_PRODUCT_BITMAP_READY (WM_APP + 1)
 
@@ -42,6 +45,7 @@ LRESULT CALLBACK RegisterWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM 
 LRESULT CALLBACK MainMenuWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK CartWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK MoreWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+LRESULT CALLBACK ProfileWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK ProductViewportWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 HWND CreateLandingWindow(HINSTANCE hInstance);
 HWND CreateLoginRegisterWindow(HINSTANCE hInstance);
@@ -50,6 +54,7 @@ HWND CreateRegisterWindow(HINSTANCE hInstance);
 HWND CreateMainMenuWindow(HINSTANCE hInstance);
 HWND CreateCartWindow(HINSTANCE hInstance);
 HWND CreateMoreWindow(HINSTANCE hInstance);
+HWND CreateProfileWindow(HINSTANCE hInstance, HWND moreWindow);
 void CreateTitleText(HWND parent, HINSTANCE hInstance);
 void CreateNextButton(HWND parent, HINSTANCE hInstance);
 void CreateLogInButton(HWND parent, HINSTANCE hInstance);
@@ -83,9 +88,21 @@ void CreateMoreProfileButton(HWND parent, HINSTANCE hInstance);
 void CreateMoreTransactionHistoryButton(HWND parent, HINSTANCE hInstance);
 void CreateMoreBackButton(HWND parent, HINSTANCE hInstance);
 void CreateMoreForm(HWND parent, HINSTANCE hInstance);
+void CreateProfileForm(HWND parent, HINSTANCE hInstance);
+void CreateProfileDefaultUserImage(HWND parent, HINSTANCE hInstance);
+void CreateProfileUserNameText(HWND parent, HINSTANCE hInstance);
+void CreateProfileBalanceText(HWND parent, HINSTANCE hInstance);
+void CreateProfileTransactionsText(HWND parent, HINSTANCE hInstance);
+void CreateProfileBackButton(HWND parent, HINSTANCE hInstance);
+void CreateProfileForm(HWND parent, HINSTANCE hInstance);
 void LoadUsers();
 void LoadProducts();
+void LoadCurrentUserDetails();
+void RegisterUser();
+void CreateUserInformationTextFile();
+void CreateUserLogsTextFile();
 std::string ToString(const TCHAR* str);
+std::string CreateTimeStamp();
 
 //Static Variables
 static HBRUSH gBackgroundBrush = CreateSolidBrush(RGB(255, 192, 203));
@@ -103,11 +120,21 @@ static ULONG_PTR gGdiplusToken = 0;
 static HANDLE gProductLoaderThread = nullptr;
 static std::vector<HBITMAP> gProductBitmaps;
 
+//Structures
+struct userInformation{
+    std::string curUserPassword;
+    long long curUserBalance;
+    std:: string curUserTransactions;
+};
+
 //Global Variables
 std::map<std::string, std::string> userMap;
+std::map<std::string, userInformation> userInformationMap;
 std::vector<std::string> gProductNames;
 std::vector<std::string> gProductIds;
 std::string currentUser;
+
+
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR LpCmdLine, int nCmdShow){
     GdiplusStartupInput gdiplusStartupInput;
@@ -179,6 +206,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR LpCmdLine
     mwc.lpszClassName = TEXT("MorePage");
     mwc.hbrBackground = gBackgroundBrush;
     RegisterClass(&mwc);
+
+    WNDCLASS pwc = {};
+    pwc.lpfnWndProc = ProfileWindowProc;
+    pwc.hInstance = hInstance;
+    pwc.lpszClassName = TEXT("ProfilePage");
+    pwc.hbrBackground = gBackgroundBrush;
+    RegisterClass(&pwc);
 
     HWND hwnd = CreateLandingWindow(hInstance);
     CreateTitleText(hwnd, hInstance);
@@ -427,6 +461,7 @@ LRESULT CALLBACK LogInWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
                     auto it = userMap.find(usernameStr);
                     if (it != userMap.end() && it->second == passwordStr) {
                         currentUser = usernameStr;
+                        LoadCurrentUserDetails();
                         ShowWindow(hwnd, SW_HIDE);
                         HWND mainMenuWindow = CreateMainMenuWindow(GetModuleHandle(nullptr));
                         CreateMainMenuForm(mainMenuWindow, GetModuleHandle(nullptr));
@@ -492,6 +527,8 @@ LRESULT CALLBACK RegisterWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM 
                             file << usernameStr << "|" << passwordStr << "\n";
                             file.close();
                             currentUser = usernameStr;
+                            LoadCurrentUserDetails();
+                            RegisterUser();
                             ShowWindow(hwnd, SW_HIDE);
                             HWND mainMenuWindow = CreateMainMenuWindow(GetModuleHandle(nullptr)); 
                             CreateMainMenuForm(mainMenuWindow, GetModuleHandle(nullptr));
@@ -639,10 +676,65 @@ LRESULT CALLBACK CartWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 LRESULT CALLBACK MoreWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
     switch(uMsg){
         case WM_COMMAND:
+            if(LOWORD(wParam) == ID_MORE_ABOUT_US_BUTTON && HIWORD(wParam) == BN_CLICKED){
+                MessageBox(hwnd, TEXT("About Us"), TEXT("About"), MB_OK);
+            }
+            else if(LOWORD(wParam) == ID_MORE_PROFILE_BUTTON && HIWORD(wParam) == BN_CLICKED){
+                ShowWindow(hwnd, SW_HIDE);
+                HWND profileWindow = CreateProfileWindow(GetModuleHandle(nullptr), hwnd);
+                CreateProfileForm(profileWindow, GetModuleHandle(nullptr));
+                ShowWindow(profileWindow, SW_SHOW);
+            }
+            else if(LOWORD(wParam) == ID_MORE_TRANSACTION_HISTORY_BUTTON && HIWORD(wParam) == BN_CLICKED){
+                MessageBox(hwnd, TEXT("Transaction History"), TEXT("Transaction History"), MB_OK);
+            }
+            else if(LOWORD(wParam) == ID_MORE_BACK_BUTTON && HIWORD(wParam) == BN_CLICKED){
+                ShowWindow(hwnd, SW_HIDE);
+                HWND mainMenuWindow = CreateMainMenuWindow(GetModuleHandle(nullptr));
+                CreateMainMenuForm(mainMenuWindow, GetModuleHandle(nullptr));
+                ShowWindow(mainMenuWindow, SW_SHOW);
+            }
             return 0;
         case WM_DESTROY:
             PostQuitMessage(0);
             return 0;
+    }
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+LRESULT CALLBACK ProfileWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
+    switch(uMsg){
+        case WM_COMMAND:
+            if (LOWORD(wParam) == ID_PROFILE_BACK_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                HWND moreWindow = reinterpret_cast<HWND>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+                ShowWindow(hwnd, SW_HIDE);
+                if (moreWindow) {
+                    ShowWindow(moreWindow, SW_SHOW);
+                }
+                return 0;
+            }
+            else if (LOWORD(wParam) == ID_PROFILE_BACK_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                ShowWindow(hwnd, SW_HIDE);
+                HWND morewindow = CreateMoreWindow(GetModuleHandle(nullptr));
+                CreateMoreForm(morewindow, GetModuleHandle(nullptr));
+                ShowWindow(morewindow, SW_SHOW);
+            }
+            return 0;
+
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY: {
+            HWND imageControl = GetDlgItem(hwnd, ID_PROFILE_IMAGE);
+            if (imageControl) {
+                HBITMAP bitmap = (HBITMAP)SendMessage(imageControl, STM_GETIMAGE, IMAGE_BITMAP, 0);
+                if (bitmap) {
+                    DeleteObject(bitmap);
+                }
+            }
+            PostQuitMessage(0);
+            return 0;
+        }
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
@@ -771,6 +863,27 @@ HWND CreateMoreWindow(HINSTANCE hInstance){
         hInstance,
         nullptr
     );
+}
+
+HWND CreateProfileWindow(HINSTANCE hInstance, HWND moreWindow){
+    HWND profileWindow = CreateWindowEx(
+        0,
+        TEXT("ProfilePage"),
+        TEXT("Profile"),
+        WS_OVERLAPPEDWINDOW,
+        gLoginRegisterWindowX,
+        gLoginRegisterWindowY,
+        800,
+        600,
+        nullptr,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+    if (profileWindow) {
+        SetWindowLongPtr(profileWindow, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(moreWindow));
+    }
+    return profileWindow;
 }
 
 void CreateTitleText(HWND parent, HINSTANCE hInstance){
@@ -1180,8 +1293,7 @@ void CreateMainMenuTitleText(HWND parent, HINSTANCE hInstance){
 }
 
 void CreateMainMenuBalanceText(HWND parent, HINSTANCE hInstance){
-    int balanceValue = 10000;
-    std::string balance = "BALANCE: P" + std::to_string(balanceValue);
+    std::string balance = "BALANCE: P" + std::to_string(userInformationMap[currentUser].curUserBalance);
     HWND label = CreateWindowExA(
         0,
         "STATIC",
@@ -1280,6 +1392,103 @@ void CreateMoreForm(HWND parent, HINSTANCE hInstance){
     CreateMoreBackButton(parent, hInstance);
 }
 
+void CreateProfileDefaultUserImage(HWND parent, HINSTANCE hInstance){
+    Gdiplus::Bitmap image(L"user.png");
+    if (image.GetLastStatus() != Gdiplus::Ok) {
+        return;
+    }
+
+    const int imageSize = 128;
+    const double scale = std::min(
+        static_cast<double>(imageSize) / image.GetWidth(),
+        static_cast<double>(imageSize) / image.GetHeight()
+    );
+    const int scaledWidth = static_cast<int>(image.GetWidth() * scale);
+    const int scaledHeight = static_cast<int>(image.GetHeight() * scale);
+    Gdiplus::Bitmap scaledImage(imageSize, imageSize, PixelFormat32bppARGB);
+    Gdiplus::Graphics graphics(&scaledImage);
+    graphics.Clear(Gdiplus::Color(255, 255, 255, 255));
+    graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+    graphics.DrawImage(
+        &image,
+        (imageSize - scaledWidth) / 2,
+        (imageSize - scaledHeight) / 2,
+        scaledWidth,
+        scaledHeight
+    );
+
+    HBITMAP bitmap = nullptr;
+    if (scaledImage.GetHBITMAP(Gdiplus::Color(255, 255, 255), &bitmap) != Gdiplus::Ok || !bitmap) {
+        return;
+    }
+
+    HWND imageControl = CreateWindowEx(
+        0,
+        TEXT("STATIC"),
+        TEXT(""),
+        WS_CHILD | WS_VISIBLE | SS_BITMAP,
+        336, 145, imageSize, imageSize,
+        parent,
+        (HMENU)ID_PROFILE_IMAGE,
+        hInstance,
+        nullptr
+    );
+    if (!imageControl) {
+        DeleteObject(bitmap);
+        return;
+    }
+    SendMessage(imageControl, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)bitmap);
+}
+
+void CreateProfileUserNameText(HWND parent, HINSTANCE hInstance){
+    std::string username = "Username: " + currentUser;
+    HWND label = CreateWindowExA(
+        0,
+        "STATIC",
+        username.c_str(),
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        270, 150, 220, 40,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateProfilePasswordText(HWND parent, HINSTANCE hInstance){
+
+}
+
+void CreateProfileBalanceText(HWND parent, HINSTANCE hInstance){
+
+}
+
+void CreateProfileTransactionsText(HWND parent, HINSTANCE hInstance){
+}
+
+void CreateProfileBackButton(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Back"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        10, 10, 90, 30,
+        parent,
+        (HMENU)ID_PROFILE_BACK_BUTTON,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateProfileForm(HWND parent, HINSTANCE hInstance){
+    CreateProfileDefaultUserImage(parent, hInstance);
+    CreateProfileUserNameText(parent, hInstance);
+    CreateProfilePasswordText(parent, hInstance);
+    CreateProfileBalanceText(parent, hInstance);
+    CreateProfileTransactionsText(parent, hInstance);
+    CreateProfileBackButton(parent, hInstance);
+}
+
 void LoadUsers(){
     userMap.clear();
     std::ifstream file("users&passwords.txt");
@@ -1341,4 +1550,98 @@ std::string ToString(const TCHAR* str){
         result[i] = static_cast<char>(str[i]);
     }
     return result;
+}
+
+void LoadCurrentUserDetails(){
+    if (currentUser.empty()) {
+        return;
+    }
+
+    std::ifstream file("User Informations/" + currentUser + ".txt");
+    if (!file) {
+        return;
+    }
+
+    userInformation details{};
+    std::string line;
+    while (std::getline(file, line)) {
+        const size_t delimiter = line.find(':');
+        if (delimiter == std::string::npos) {
+            continue;
+        }
+
+        const std::string field = line.substr(0, delimiter);
+        std::string value = line.substr(delimiter + 1);
+        const size_t valueStart = value.find_first_not_of(" \t\r");
+        if (valueStart == std::string::npos) {
+            value.clear();
+        } else {
+            value.erase(0, valueStart);
+        }
+
+        if (field == "Password") {
+            details.curUserPassword = value;
+        } else if (field == "Balance") {
+            try {
+                details.curUserBalance = std::stoll(value);
+            } catch (...) {
+                details.curUserBalance = 0;
+            }
+        } else if (field == "Transactions") {
+            details.curUserTransactions = value;
+        }
+    }
+
+    userInformationMap[currentUser] = details;
+}
+
+void RegisterUser(){
+    CreateUserInformationTextFile();
+    CreateUserLogsTextFile();
+}
+
+void CreateUserInformationTextFile(){
+    auto user = userMap.find(currentUser);
+    if (user == userMap.end()) {
+        return;
+    }
+
+    const std::string filePath = "User Informations/" + currentUser + ".txt";
+    std::ofstream file(filePath);
+    if (!file) {
+        return;
+    }
+
+    file << "Username: " << currentUser << '\n'
+         << "Password: " << user->second << '\n'
+         << "Balance: 0\n"
+         << "Transations: 0\n";
+}
+
+void CreateUserLogsTextFile(){
+    auto user = userMap.find(currentUser);
+    if(user == userMap.end()){
+        return;
+    }
+
+    const std::string filePath = "User Logs/" + currentUser + ".txt";
+    std::ofstream file(filePath);
+    if (!file) {
+        return;
+    }
+    file << CreateTimeStamp() + " - Account Created"<< '\n';
+}
+
+std::string CreateTimeStamp(){
+    const std::time_t now = std::time(nullptr);
+    const char* timeText = std::ctime(&now);
+    if (!timeText) {
+        return "";
+    }
+
+    std::string timestamp(timeText);
+    if (!timestamp.empty() && timestamp.back() == '\n') {
+        timestamp.pop_back();
+    }
+    return timestamp;
 }

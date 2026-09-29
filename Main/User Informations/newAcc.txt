@@ -1,0 +1,4 @@
+Username: newAcc
+Password: testing
+Balance: 0
+Transations: 0
