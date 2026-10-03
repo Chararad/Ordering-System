@@ -30,6 +30,7 @@ using namespace Gdiplus;
 #define ID_PROFILE_IMAGE 116
 #define ID_PROFILE_BACK_BUTTON 117
 #define ID_ABOUT_US_BACK_BUTTON 118
+#define ID_TRANSACTION_HISTORY_BACK_BUTTON 119
 #define ID_PRODUCT_BUTTON_BASE 2000
 #define WM_PRODUCT_BITMAP_READY (WM_APP + 1)
 
@@ -48,6 +49,8 @@ LRESULT CALLBACK CartWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 LRESULT CALLBACK MoreWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK ProfileWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK AboutUsWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+LRESULT CALLBACK TransactionHistoryWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+LRESULT CALLBACK ProductDetailsWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK ProductViewportWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 HWND CreateLandingWindow(HINSTANCE hInstance);
 HWND CreateLoginRegisterWindow(HINSTANCE hInstance);
@@ -58,6 +61,8 @@ HWND CreateCartWindow(HINSTANCE hInstance);
 HWND CreateMoreWindow(HINSTANCE hInstance);
 HWND CreateProfileWindow(HINSTANCE hInstance, HWND moreWindow);
 HWND CreateAboutUsWindow(HINSTANCE hInstance, HWND moreWindow);
+HWND CreateTransactionHistoryWindow(HINSTANCE hInstance, HWND moreWindow);
+HWND CreateProductDetailsWindow(HINSTANCE hInstance);
 void CreateTitleText(HWND parent, HINSTANCE hInstance);
 void CreateNextButton(HWND parent, HINSTANCE hInstance);
 void CreateLogInButton(HWND parent, HINSTANCE hInstance);
@@ -100,6 +105,9 @@ void CreateProfileBackButton(HWND parent, HINSTANCE hInstance);
 void CreateAboutUsText(HWND parent, HINSTANCE hInstance);
 void CreateAboutUsBackButton(HWND parent, HINSTANCE hInstance);
 void CreateAboutUsForm(HWND parent, HINSTANCE hInstance);
+void CreateTransactionHistoryText(HWND parent, HINSTANCE hInstance);
+void CreateTransactionHistoryBackButton(HWND parent, HINSTANCE hInstance);
+void CreateTransactionHistoryForm(HWND parent, HINSTANCE hInstance);
 void CreateProfileForm(HWND parent, HINSTANCE hInstance);
 void LoadUsers();
 void LoadProducts();
@@ -241,6 +249,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR LpCmdLine
     auwc.lpszClassName = TEXT("AboutUsPage");
     auwc.hbrBackground = gBackgroundBrush;
     RegisterClass(&auwc);
+
+    WNDCLASS thwc = {};
+    thwc.lpfnWndProc = TransactionHistoryWindowProc;
+    thwc.hInstance = hInstance;
+    thwc.lpszClassName = TEXT("TransactionHistoryPage");
+    thwc.hbrBackground = gBackgroundBrush;
+    RegisterClass(&thwc);
+
+    WNDCLASS pdwc = {};
+    pdwc.lpfnWndProc = ProductDetailsWindowProc;
+    pdwc.hInstance = hInstance;
+    pdwc.lpszClassName = TEXT("ProductDetailsPage");
+    pdwc.hbrBackground = gBackgroundBrush;
+    RegisterClass(&pdwc);
 
     HWND hwnd = CreateLandingWindow(hInstance);
     CreateTitleText(hwnd, hInstance);
@@ -719,7 +741,10 @@ LRESULT CALLBACK MoreWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 ShowWindow(profileWindow, SW_SHOW);
             }
             else if(LOWORD(wParam) == ID_MORE_TRANSACTION_HISTORY_BUTTON && HIWORD(wParam) == BN_CLICKED){
-                MessageBox(hwnd, TEXT("Transaction History"), TEXT("Transaction History"), MB_OK);
+                ShowWindow(hwnd, SW_HIDE);
+                HWND historyWindow = CreateTransactionHistoryWindow(GetModuleHandle(nullptr), hwnd);
+                CreateTransactionHistoryForm(historyWindow, GetModuleHandle(nullptr));
+                ShowWindow(historyWindow, SW_SHOW);
             }
             else if(LOWORD(wParam) == ID_MORE_BACK_BUTTON && HIWORD(wParam) == BN_CLICKED){
                 DestroyWindowForNavigation(hwnd);
@@ -822,6 +847,58 @@ LRESULT CALLBACK AboutUsWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
             return 0;
         }
     }
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+LRESULT CALLBACK TransactionHistoryWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
+    switch(uMsg){
+        case WM_COMMAND:
+            if (LOWORD(wParam) == ID_TRANSACTION_HISTORY_BACK_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                HWND moreWindow = reinterpret_cast<HWND>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+                DestroyWindowForNavigation(hwnd);
+                if (moreWindow) {
+                    ShowWindow(moreWindow, SW_SHOW);
+                }
+                return 0;
+            }
+            return 0;
+
+        case WM_ERASEBKGND: {
+            HDC hdc = (HDC)wParam;
+            RECT rect;
+            GetClientRect(hwnd, &rect);
+            FillRect(hdc, &rect, gBackgroundBrush);
+            return TRUE;
+        }
+
+        case WM_CTLCOLORSTATIC: {
+            HDC hdc = (HDC)wParam;
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, RGB(80, 30, 50));
+            return (LRESULT)gBackgroundBrush;
+        }
+
+        case WM_CLOSE: {
+            HWND moreWindow = reinterpret_cast<HWND>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+            DestroyWindowForNavigation(hwnd);
+            if (moreWindow) {
+                ShowWindow(moreWindow, SW_SHOW);
+            }
+            return 0;
+        }
+
+        case WM_DESTROY:
+            if (!gNavigationDestroy) PostQuitMessage(0);
+            return 0;
+    }
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+LRESULT CALLBACK ProductDetailsWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
+    switch(uMsg){
+
+    }
+
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
@@ -994,6 +1071,45 @@ HWND CreateAboutUsWindow(HINSTANCE hInstance, HWND moreWindow){
     }
     return aboutUsWindow;
 }
+
+HWND CreateTransactionHistoryWindow(HINSTANCE hInstance, HWND moreWindow){
+    HWND historyWindow = CreateWindowEx(
+        0,
+        TEXT("TransactionHistoryPage"),
+        TEXT("Transaction History"),
+        WS_OVERLAPPEDWINDOW,
+        gLoginRegisterWindowX,
+        gLoginRegisterWindowY,
+        800,
+        600,
+        nullptr,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+    if (historyWindow) {
+        SetWindowLongPtr(historyWindow, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(moreWindow));
+    }
+    return historyWindow;
+}
+
+HWND CreateProductDetailsWindow(HINSTANCE hInstance){
+    return CreateWindowEx(
+        0,
+        TEXT("ProductDetailsPage"),
+        TEXT("ProductDetails"),
+        WS_OVERLAPPEDWINDOW,
+        gLoginRegisterWindowX,
+        gLoginRegisterWindowY,
+        800,
+        600,
+        nullptr,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+}
+
 void CreateTitleText(HWND parent, HINSTANCE hInstance){
     HWND label = CreateWindowEx(
         0,
@@ -1542,6 +1658,52 @@ void CreateAboutUsBackButton(HWND parent, HINSTANCE hInstance){
 void CreateAboutUsForm(HWND parent, HINSTANCE hInstance){
     CreateAboutUsText(parent, hInstance);
     CreateAboutUsBackButton(parent, hInstance);
+}
+
+void CreateTransactionHistoryText(HWND parent, HINSTANCE hInstance){
+    std::ifstream file("User Transaction History/" + currentUser + ".txt");
+    std::string historyText;
+    std::string line;
+    while (std::getline(file, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        historyText += line + "\r\n";
+    }
+    if (historyText.empty()) {
+        historyText = "No transaction history available.";
+    }
+
+    CreateWindowExA(
+        0,
+        "STATIC",
+        historyText.c_str(),
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        40, 60, 700, 450,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateTransactionHistoryForm(HWND parent, HINSTANCE hInstance){
+    CreateTransactionHistoryText(parent, hInstance);
+    CreateTransactionHistoryBackButton(parent, hInstance);
+}
+
+void CreateTransactionHistoryBackButton(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Back"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        10, 10, 90, 30,
+        parent,
+        (HMENU)ID_TRANSACTION_HISTORY_BACK_BUTTON,
+        hInstance,
+        nullptr
+    );
 }
 
 void CreateProfileDefaultUserImage(HWND parent, HINSTANCE hInstance){
