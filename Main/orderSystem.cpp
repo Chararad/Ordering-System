@@ -8,6 +8,7 @@
 #include <cctype>
 #include <gdiplus.h>
 #include <ctime>
+#include <limits>
 
 using namespace Gdiplus;
 
@@ -31,6 +32,20 @@ using namespace Gdiplus;
 #define ID_PROFILE_BACK_BUTTON 117
 #define ID_ABOUT_US_BACK_BUTTON 118
 #define ID_TRANSACTION_HISTORY_BACK_BUTTON 119
+#define ID_PRODUCT_DETAILS_IMAGE 120
+#define ID_PRODUCT_DETAILS_BACK_BUTTON 121
+#define ID_PRODUCT_DETAILS_ADD_TO_CART_BUTTON 122
+#define ID_PRODUCT_DETAILS_QUANTITY_EDIT 123
+#define ID_CART_ITEMS_LIST 124
+#define ID_CART_QUANTITY_MINUS_BUTTON 125
+#define ID_CART_QUANTITY_PLUS_BUTTON 126
+#define ID_CART_TOTAL_TEXT 127
+#define ID_CART_BACK_BUTTON 128
+#define ID_MAIN_MENU_DEPOSIT_BUTTON 129
+#define ID_MAIN_MENU_BALANCE_TEXT 130
+#define ID_DEPOSIT_AMOUNT_EDIT 131
+#define ID_DEPOSIT_SUBMIT_BUTTON 132
+#define ID_DEPOSIT_BACK_BUTTON 133
 #define ID_PRODUCT_BUTTON_BASE 2000
 #define WM_PRODUCT_BITMAP_READY (WM_APP + 1)
 
@@ -38,7 +53,7 @@ using namespace Gdiplus;
 //Function Declarations
 static std::string GetProductImagePath(const std::string& productId);
 static HBITMAP CreateDefaultProductBitmap(const std::string& productName, int width, int height);
-static HBITMAP LoadProductBitmap(const std::string& productId, const std::string& productName);
+static HBITMAP LoadProductBitmap(const std::string& productId, const std::string& productName, int bitmapWidth = 140, int bitmapHeight = 140);
 static DWORD WINAPI PreloadProductBitmaps(LPVOID parameter);
 LRESULT CALLBACK LandingWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK LoginRegisterWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
@@ -52,6 +67,7 @@ LRESULT CALLBACK AboutUsWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
 LRESULT CALLBACK TransactionHistoryWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK ProductDetailsWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK ProductViewportWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+LRESULT CALLBACK DepositWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 HWND CreateLandingWindow(HINSTANCE hInstance);
 HWND CreateLoginRegisterWindow(HINSTANCE hInstance);
 HWND CreateLogInWindow(HINSTANCE hInstance);
@@ -63,6 +79,7 @@ HWND CreateProfileWindow(HINSTANCE hInstance, HWND moreWindow);
 HWND CreateAboutUsWindow(HINSTANCE hInstance, HWND moreWindow);
 HWND CreateTransactionHistoryWindow(HINSTANCE hInstance, HWND moreWindow);
 HWND CreateProductDetailsWindow(HINSTANCE hInstance);
+HWND CreateDepositWindow(HINSTANCE hInstance, HWND mainMenu);
 void CreateTitleText(HWND parent, HINSTANCE hInstance);
 void CreateNextButton(HWND parent, HINSTANCE hInstance);
 void CreateLogInButton(HWND parent, HINSTANCE hInstance);
@@ -89,6 +106,8 @@ void CreateMainMenuMoreButton(HWND parent, HINSTANCE hInstance);
 void CreateMainMenuGreetingsText(HWND parent, HINSTANCE hInstance);
 void CreateMainMenuTitleText(HWND parent, HINSTANCE hInstance);
 void CreateMainMenuBalanceText(HWND parent, HINSTANCE hInstance);
+void CreateMainMenuDepositButton(HWND parent, HINSTANCE hInstance);
+void CreateDepositForm(HWND parent, HINSTANCE hInstance);
 void CreateMainMenuForm(HWND parent, HINSTANCE hInstance);
 void MainMenuExit(HWND hwnd);
 void CreateMoreAboutUsButton(HWND parent, HINSTANCE hInstance);
@@ -108,10 +127,19 @@ void CreateAboutUsForm(HWND parent, HINSTANCE hInstance);
 void CreateTransactionHistoryText(HWND parent, HINSTANCE hInstance);
 void CreateTransactionHistoryBackButton(HWND parent, HINSTANCE hInstance);
 void CreateTransactionHistoryForm(HWND parent, HINSTANCE hInstance);
+void CreateProductDetailsForm(HWND parent, HINSTANCE hInstance, int productIndex);
 void CreateProfileForm(HWND parent, HINSTANCE hInstance);
+void CreateProductDetailsAddToCartButton(HWND parent, HINSTANCE hInstance);
+void CreateCartTotalText(HWND parent, HINSTANCE hInstance);
+void CreateCartBackButton(HWND parent, HINSTANCE hInstance);
+void CreateCartList(HWND parent, HINSTANCE hInstance);
+void CreateCartQuantityButtons(HWND parent, HINSTANCE hInstance);
+void CreateCartForm(HWND parent, HINSTANCE hInstance);
 void LoadUsers();
 void LoadProducts();
+void LoadProductDetails();
 void LoadCurrentUserDetails();
+bool SaveCurrentUserDetails();
 void RegisterUser();
 void LoginUser();
 void LoginUserLogs();
@@ -138,6 +166,7 @@ static ULONG_PTR gGdiplusToken = 0;
 static HANDLE gProductLoaderThread = nullptr;
 static std::vector<HBITMAP> gProductBitmaps;
 static bool gNavigationDestroy = false;
+static HWND gProductDetailsMainMenu = nullptr;
 
 static void DestroyWindowForNavigation(HWND hwnd) {
     gNavigationDestroy = true;
@@ -147,6 +176,8 @@ static void DestroyWindowForNavigation(HWND hwnd) {
     DestroyWindow(hwnd);
     gNavigationDestroy = false;
 }
+static void RefreshCartList(HWND parent, int selectedIndex = -1);
+static std::string FormatCartPrice(long long price);
 
 //Structures
 struct userInformation{
@@ -155,9 +186,27 @@ struct userInformation{
     std:: string curUserTransactions;
 };
 
+struct productInformation{
+    std::string productId;
+    std::string productName;
+    std::string productDescription;
+    std::string productFlowerType;
+    long long productPrice;
+};
+
+struct cartItem{
+    std::string orderProductId;
+    std::string orderProductName;
+    long long orderProductPrice;
+    long long quantity;
+    long long totalPrice;
+};
+
 //Global Variables
 std::map<std::string, std::string> userMap;
 std::map<std::string, userInformation> userInformationMap;
+std::map<std::string, productInformation> productInformationMap;
+std::vector<cartItem> cartItemVector;
 std::vector<std::string> transactions;
 std::vector<std::string> gProductNames;
 std::vector<std::string> gProductIds;
@@ -171,6 +220,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR LpCmdLine
 
     LoadUsers();
     LoadProducts();
+    LoadProductDetails();
     gProductBitmaps.resize(gProductIds.size(), nullptr);
     int screenW = GetSystemMetrics(SM_CXSCREEN);
     int screenH = GetSystemMetrics(SM_CYSCREEN);
@@ -264,6 +314,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR LpCmdLine
     pdwc.hbrBackground = gBackgroundBrush;
     RegisterClass(&pdwc);
 
+    WNDCLASS dwc = {};
+    dwc.lpfnWndProc = DepositWindowProc;
+    dwc.hInstance = hInstance;
+    dwc.lpszClassName = TEXT("DepositPage");
+    dwc.hbrBackground = gBackgroundBrush;
+    RegisterClass(&dwc);
+
     HWND hwnd = CreateLandingWindow(hInstance);
     CreateTitleText(hwnd, hInstance);
     CreateNextButton(hwnd, hInstance);
@@ -342,14 +399,12 @@ static HBITMAP CreateDefaultProductBitmap(const std::string& productName, int wi
     return bitmap;
 }
 
-static HBITMAP LoadProductBitmap(const std::string& productId, const std::string& productName) {
+static HBITMAP LoadProductBitmap(const std::string& productId, const std::string& productName, int bitmapWidth, int bitmapHeight) {
     std::string path = GetProductImagePath(productId);
     std::wstring widePath(path.begin(), path.end());
 
     Gdiplus::Bitmap image(widePath.c_str());
     if (image.GetLastStatus() == Gdiplus::Ok) {
-        const int bitmapWidth = 140;
-        const int bitmapHeight = 140;
         const double scale = std::min(
             static_cast<double>(bitmapWidth) / image.GetWidth(),
             static_cast<double>(bitmapHeight) / image.GetHeight()
@@ -579,8 +634,8 @@ LRESULT CALLBACK RegisterWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM 
                             file << usernameStr << "|" << passwordStr << "\n";
                             file.close();
                             currentUser = usernameStr;
-                            LoadCurrentUserDetails();
                             RegisterUser();
+                            LoadCurrentUserDetails();
                             DestroyWindowForNavigation(hwnd);
                             HWND mainMenuWindow = CreateMainMenuWindow(GetModuleHandle(nullptr)); 
                             CreateMainMenuForm(mainMenuWindow, GetModuleHandle(nullptr));
@@ -630,7 +685,16 @@ LRESULT CALLBACK MainMenuWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM 
             else if(LOWORD(wParam) == ID_MAIN_MENU_CART_BUTTON && HIWORD(wParam) == BN_CLICKED) {
                 DestroyWindowForNavigation(hwnd);
                 HWND cartWindow = CreateCartWindow(GetModuleHandle(nullptr));
+                CreateCartForm(cartWindow, GetModuleHandle(nullptr));
                 ShowWindow(cartWindow, SW_SHOW);
+            }
+            else if (LOWORD(wParam) == ID_MAIN_MENU_DEPOSIT_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                HWND depositWindow = CreateDepositWindow(GetModuleHandle(nullptr), hwnd);
+                if (depositWindow) {
+                    CreateDepositForm(depositWindow, GetModuleHandle(nullptr));
+                    ShowWindow(hwnd, SW_HIDE);
+                    ShowWindow(depositWindow, SW_SHOW);
+                }
             }
             else if (LOWORD(wParam) == ID_MAIN_MENU_MORE_BUTTON && HIWORD(wParam) == BN_CLICKED) {
                 DestroyWindowForNavigation(hwnd);
@@ -642,9 +706,14 @@ LRESULT CALLBACK MainMenuWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM 
                 int controlId = LOWORD(wParam);
                 if (controlId >= ID_PRODUCT_BUTTON_BASE && controlId < ID_PRODUCT_BUTTON_BASE + (int)gProductNames.size()) {
                     int productIndex = controlId - ID_PRODUCT_BUTTON_BASE;
-                    std::string productName = gProductNames[productIndex];
-                    std::string details = "Selected flower: " + productName + "\n\nThis is a sample product detail window.";
-                    MessageBoxA(hwnd, details.c_str(), "Flower Details", MB_OK | MB_ICONINFORMATION);
+                    HWND detailsWindow = CreateProductDetailsWindow(GetModuleHandle(nullptr));
+                    if (detailsWindow) {
+                        gProductDetailsMainMenu = hwnd;
+                        SetWindowLongPtr(detailsWindow, GWLP_USERDATA, static_cast<LONG_PTR>(productIndex));
+                        CreateProductDetailsForm(detailsWindow, GetModuleHandle(nullptr), productIndex);
+                        ShowWindow(hwnd, SW_HIDE);
+                        ShowWindow(detailsWindow, SW_SHOW);
+                    }
                 }
             }
             return 0;
@@ -718,6 +787,169 @@ LRESULT CALLBACK MainMenuWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM 
 
 LRESULT CALLBACK CartWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
     switch(uMsg){
+        case WM_COMMAND:
+            if (LOWORD(wParam) == ID_CART_QUANTITY_PLUS_BUTTON ||
+                LOWORD(wParam) == ID_CART_QUANTITY_MINUS_BUTTON) {
+                HWND list = GetDlgItem(hwnd, ID_CART_ITEMS_LIST);
+                int selectedIndex = static_cast<int>(SendMessage(list, LB_GETCURSEL, 0, 0));
+                if (selectedIndex == LB_ERR || selectedIndex >= static_cast<int>(cartItemVector.size())) {
+                    return 0;
+                }
+
+                cartItem& item = cartItemVector[selectedIndex];
+                if (LOWORD(wParam) == ID_CART_QUANTITY_PLUS_BUTTON) {
+                    ++item.quantity;
+                } else if (item.quantity > 1) {
+                    --item.quantity;
+                }
+                item.totalPrice = item.orderProductPrice * item.quantity;
+                RefreshCartList(hwnd, selectedIndex);
+                return 0;
+            }
+            if (LOWORD(wParam) == ID_CART_BACK_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                DestroyWindowForNavigation(hwnd);
+                HWND mainMenu = CreateMainMenuWindow(GetModuleHandle(nullptr));
+                CreateMainMenuForm(mainMenu, GetModuleHandle(nullptr));
+                ShowWindow(mainMenu, SW_SHOW);
+                return 0;
+            }
+            return 0;
+
+        case WM_ERASEBKGND: {
+            HDC hdc = (HDC)wParam;
+            RECT rect;
+            GetClientRect(hwnd, &rect);
+            FillRect(hdc, &rect, gBackgroundBrush);
+            return TRUE;
+        }
+
+        case WM_CTLCOLORSTATIC: {
+            HDC hdc = (HDC)wParam;
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, RGB(80, 30, 50));
+            return (LRESULT)gBackgroundBrush;
+        }
+
+        case WM_CLOSE: {
+            DestroyWindow(hwnd);
+            return 0;
+        }
+
+        case WM_DESTROY:
+            if (!gNavigationDestroy) PostQuitMessage(0);
+            return 0;
+    }
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+LRESULT CALLBACK DepositWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
+    switch(uMsg){
+        case WM_COMMAND:
+            if (LOWORD(wParam) == ID_DEPOSIT_BACK_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                HWND mainMenu = reinterpret_cast<HWND>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+                DestroyWindowForNavigation(hwnd);
+                if (mainMenu) {
+                    ShowWindow(mainMenu, SW_SHOW);
+                }
+                return 0;
+            }
+            if (LOWORD(wParam) == ID_DEPOSIT_SUBMIT_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                char amountText[32] = {};
+                GetDlgItemTextA(hwnd, ID_DEPOSIT_AMOUNT_EDIT, amountText, sizeof(amountText));
+                const std::string amountString(amountText);
+                if (amountString.empty() || !std::all_of(amountString.begin(), amountString.end(), [](unsigned char ch) {
+                    return std::isdigit(ch);
+                })) {
+                    MessageBox(hwnd, TEXT("Enter a whole-number deposit amount."), TEXT("Deposit"), MB_OK | MB_ICONWARNING);
+                    return 0;
+                }
+
+                long long amount = 0;
+                try {
+                    amount = std::stoll(amountString);
+                } catch (...) {
+                    MessageBox(hwnd, TEXT("The deposit amount is too large."), TEXT("Deposit"), MB_OK | MB_ICONWARNING);
+                    return 0;
+                }
+                if (amount <= 0) {
+                    MessageBox(hwnd, TEXT("The deposit must be greater than zero."), TEXT("Deposit"), MB_OK | MB_ICONWARNING);
+                    return 0;
+                }
+                if (amount > 1000000) {
+                    MessageBox(hwnd, TEXT("The maximum deposit is P1,000,000."), TEXT("Deposit"), MB_OK | MB_ICONWARNING);
+                    return 0;
+                }
+
+                auto userDetails = userInformationMap.find(currentUser);
+                if (userDetails == userInformationMap.end()) {
+                    MessageBox(hwnd, TEXT("Could not load this account."), TEXT("Deposit"), MB_OK | MB_ICONERROR);
+                    return 0;
+                }
+                if (userDetails->second.curUserBalance > std::numeric_limits<long long>::max() - amount) {
+                    MessageBox(hwnd, TEXT("This deposit exceeds the supported balance."), TEXT("Deposit"), MB_OK | MB_ICONWARNING);
+                    return 0;
+                }
+
+                long long transactionCount = 0;
+                try {
+                    transactionCount = std::stoll(userDetails->second.curUserTransactions);
+                } catch (...) {
+                    transactionCount = 0;
+                }
+                if (transactionCount < 0 || transactionCount == std::numeric_limits<long long>::max()) {
+                    MessageBox(hwnd, TEXT("Could not update the transaction count."), TEXT("Deposit"), MB_OK | MB_ICONERROR);
+                    return 0;
+                }
+
+                const long long previousBalance = userDetails->second.curUserBalance;
+                const std::string previousTransactionCount = userDetails->second.curUserTransactions;
+                userDetails->second.curUserBalance += amount;
+                userDetails->second.curUserTransactions = std::to_string(transactionCount + 1);
+                if (!SaveCurrentUserDetails()) {
+                    userDetails->second.curUserBalance = previousBalance;
+                    userDetails->second.curUserTransactions = previousTransactionCount;
+                    MessageBox(hwnd, TEXT("Could not save the updated account balance."), TEXT("Deposit"), MB_OK | MB_ICONERROR);
+                    return 0;
+                }
+
+                std::ofstream historyFile("User Transaction History/" + currentUser + ".txt", std::ios::app);
+                if (historyFile) {
+                    historyFile << CreateTimeStamp() << " - Deposit: P" << FormatCartPrice(amount) << '\n';
+                }
+
+                HWND mainMenu = reinterpret_cast<HWND>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+                if (mainMenu) {
+                    const std::string balanceText = "BALANCE: P" + FormatCartPrice(userDetails->second.curUserBalance);
+                    SetWindowTextA(GetDlgItem(mainMenu, ID_MAIN_MENU_BALANCE_TEXT), balanceText.c_str());
+                }
+                MessageBox(hwnd, TEXT("Deposit successful."), TEXT("Deposit"), MB_OK | MB_ICONINFORMATION);
+                DestroyWindowForNavigation(hwnd);
+                if (mainMenu) {
+                    ShowWindow(mainMenu, SW_SHOW);
+                }
+                return 0;
+            }
+            return 0;
+
+        case WM_ERASEBKGND: {
+            HDC hdc = (HDC)wParam;
+            RECT rect;
+            GetClientRect(hwnd, &rect);
+            FillRect(hdc, &rect, gBackgroundBrush);
+            return TRUE;
+        }
+
+        case WM_CTLCOLORSTATIC: {
+            HDC hdc = (HDC)wParam;
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, RGB(80, 30, 50));
+            return (LRESULT)gBackgroundBrush;
+        }
+
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+
         case WM_DESTROY:
             if (!gNavigationDestroy) PostQuitMessage(0);
             return 0;
@@ -835,11 +1067,7 @@ LRESULT CALLBACK AboutUsWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
         }
 
         case WM_CLOSE: {
-            HWND moreWindow = reinterpret_cast<HWND>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
-            DestroyWindowForNavigation(hwnd);
-            if (moreWindow) {
-                ShowWindow(moreWindow, SW_SHOW);
-            }
+            DestroyWindow(hwnd);
             return 0;
         }
         case WM_DESTROY: {
@@ -879,11 +1107,7 @@ LRESULT CALLBACK TransactionHistoryWindowProc(HWND hwnd, UINT uMsg, WPARAM wPara
         }
 
         case WM_CLOSE: {
-            HWND moreWindow = reinterpret_cast<HWND>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
-            DestroyWindowForNavigation(hwnd);
-            if (moreWindow) {
-                ShowWindow(moreWindow, SW_SHOW);
-            }
+            DestroyWindow(hwnd);
             return 0;
         }
 
@@ -896,6 +1120,99 @@ LRESULT CALLBACK TransactionHistoryWindowProc(HWND hwnd, UINT uMsg, WPARAM wPara
 
 LRESULT CALLBACK ProductDetailsWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
     switch(uMsg){
+        case WM_COMMAND:
+            if (LOWORD(wParam) == ID_PRODUCT_DETAILS_BACK_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                HWND mainMenu = gProductDetailsMainMenu;
+                DestroyWindowForNavigation(hwnd);
+                gProductDetailsMainMenu = nullptr;
+                if (mainMenu) {
+                    ShowWindow(mainMenu, SW_SHOW);
+                }
+                return 0;
+            }
+            else if (LOWORD(wParam) == ID_PRODUCT_DETAILS_ADD_TO_CART_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                BOOL quantityValid = FALSE;
+                UINT quantity = GetDlgItemInt(hwnd, ID_PRODUCT_DETAILS_QUANTITY_EDIT, &quantityValid, FALSE);
+                if (!quantityValid || quantity == 0) {
+                    MessageBox(hwnd, TEXT("Please enter a valid quantity."), TEXT("Add to Cart"), MB_OK);
+                    return 0;
+                }
+
+                const LONG_PTR productIndex = GetWindowLongPtr(hwnd, GWLP_USERDATA);
+                if (productIndex < 0 || productIndex >= static_cast<LONG_PTR>(gProductIds.size()) ||
+                    productIndex >= static_cast<LONG_PTR>(gProductNames.size())) {
+                    MessageBox(hwnd, TEXT("Could not find this product."), TEXT("Add to Cart"), MB_OK);
+                    return 0;
+                }
+
+                std::string productId = gProductIds[productIndex];
+                productId.erase(std::remove_if(productId.begin(), productId.end(), [](unsigned char ch) {
+                    return !std::isdigit(ch);
+                }), productId.end());
+                if (productId.empty()) {
+                    productId = "001";
+                }
+                const std::string& productName = gProductNames[productIndex];
+                auto productDetails = productInformationMap.find(productId);
+                if (productDetails == productInformationMap.end()) {
+                    MessageBox(hwnd, TEXT("Could not load this product's price."), TEXT("Add to Cart"), MB_OK);
+                    return 0;
+                }
+                const long long productPrice = productDetails->second.productPrice;
+
+                auto it = std::find_if(cartItemVector.begin(), cartItemVector.end(),
+                    [&productId](const cartItem& item) { return item.orderProductId == productId; });
+
+                if (it != cartItemVector.end()) {
+                    it->quantity += quantity;
+                    it->totalPrice = it->orderProductPrice * it->quantity;
+                } else {
+                    cartItem newItem;
+                    newItem.orderProductId = productId;
+                    newItem.orderProductName = productName;
+                    newItem.orderProductPrice = productPrice;
+                    newItem.quantity = quantity;
+                    newItem.totalPrice = productPrice * quantity;
+                    cartItemVector.push_back(newItem);
+                }
+
+                MessageBox(hwnd, TEXT("Added to cart successfully!"), TEXT("Add to Cart"), MB_OK);
+            }
+                
+            return 0;
+
+        case WM_ERASEBKGND: {
+            HDC hdc = (HDC)wParam;
+            RECT rect;
+            GetClientRect(hwnd, &rect);
+            FillRect(hdc, &rect, gBackgroundBrush);
+            return TRUE;
+        }
+
+        case WM_CTLCOLORSTATIC: {
+            HDC hdc = (HDC)wParam;
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, RGB(80, 30, 50));
+            return (LRESULT)gBackgroundBrush;
+        }
+
+        case WM_CLOSE: {
+            gProductDetailsMainMenu = nullptr;
+            DestroyWindow(hwnd);
+            return 0;
+        }
+
+        case WM_DESTROY: {
+            HWND imageControl = GetDlgItem(hwnd, ID_PRODUCT_DETAILS_IMAGE);
+            if (imageControl) {
+                HBITMAP bitmap = (HBITMAP)SendMessage(imageControl, STM_GETIMAGE, IMAGE_BITMAP, 0);
+                if (bitmap) {
+                    DeleteObject(bitmap);
+                }
+            }
+            if (!gNavigationDestroy) PostQuitMessage(0);
+            return 0;
+        }
 
     }
 
@@ -1110,6 +1427,175 @@ HWND CreateProductDetailsWindow(HINSTANCE hInstance){
     );
 }
 
+HWND CreateDepositWindow(HINSTANCE hInstance, HWND mainMenu){
+    HWND depositWindow = CreateWindowEx(
+        WS_EX_DLGMODALFRAME,
+        TEXT("DepositPage"),
+        TEXT("Deposit Funds"),
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+        gLoginRegisterWindowX + 190,
+        gLoginRegisterWindowY + 150,
+        420,
+        260,
+        nullptr,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+    if (depositWindow) {
+        SetWindowLongPtr(depositWindow, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(mainMenu));
+    }
+    return depositWindow;
+}
+
+void CreateDepositForm(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("STATIC"),
+        TEXT("Amount (P):"),
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        55, 75, 90, 28,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+    CreateWindowEx(
+        0,
+        TEXT("EDIT"),
+        TEXT(""),
+        WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL,
+        150, 70, 200, 30,
+        parent,
+        (HMENU)ID_DEPOSIT_AMOUNT_EDIT,
+        hInstance,
+        nullptr
+    );
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Deposit"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        145, 130, 100, 35,
+        parent,
+        (HMENU)ID_DEPOSIT_SUBMIT_BUTTON,
+        hInstance,
+        nullptr
+    );
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Back"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        255, 130, 90, 35,
+        parent,
+        (HMENU)ID_DEPOSIT_BACK_BUTTON,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateProductDetailsForm(HWND parent, HINSTANCE hInstance, int productIndex){
+    if (productIndex < 0 || productIndex >= static_cast<int>(gProductNames.size()) ||
+        productIndex >= static_cast<int>(gProductIds.size())) {
+        return;
+    }
+
+    const std::string& productName = gProductNames[productIndex];
+    const std::string& productId = gProductIds[productIndex];
+    std::string normalizedId = productId;
+    normalizedId.erase(std::remove_if(normalizedId.begin(), normalizedId.end(), [](unsigned char ch) {
+        return !std::isdigit(ch);
+    }), normalizedId.end());
+    if (normalizedId.empty()) {
+        normalizedId = "001";
+    }
+
+    HBITMAP productBitmap = LoadProductBitmap(productId, productName, 300, 300);
+    HWND imageControl = CreateWindowEx(
+        0,
+        TEXT("STATIC"),
+        TEXT(""),
+        WS_CHILD | WS_VISIBLE | SS_BITMAP,
+        40, 90, 300, 300,
+        parent,
+        (HMENU)ID_PRODUCT_DETAILS_IMAGE,
+        hInstance,
+        nullptr
+    );
+    if (imageControl && productBitmap) {
+        SendMessage(imageControl, STM_SETIMAGE, IMAGE_BITMAP, reinterpret_cast<LPARAM>(productBitmap));
+    } else if (productBitmap) {
+        DeleteObject(productBitmap);
+    }
+
+    CreateWindowExA(
+        0,
+        "STATIC",
+        productName.c_str(),
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        390, 100, 340, 45,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+
+    std::string productDetails;
+    auto detailsIt = productInformationMap.find(normalizedId);
+    if (detailsIt != productInformationMap.end()) {
+        const productInformation& details = detailsIt->second;
+        std::string formattedPrice = std::to_string(details.productPrice);
+        for (size_t position = formattedPrice.length(); position > 3; position -= 3) {
+            formattedPrice.insert(position - 3, ",");
+        }
+        productDetails = "Price: P" + formattedPrice + "\r\n\r\n" +
+            "Flower Type: " + details.productFlowerType + "\r\n\r\n" +
+            "Description: " + details.productDescription;
+    } else {
+        productDetails = "No additional details available.";
+    }
+
+    CreateWindowExA(
+        0,
+        "STATIC",
+        productDetails.c_str(),
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        390, 165, 340, 250,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Back"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        10, 10, 90, 30,
+        parent,
+        (HMENU)ID_PRODUCT_DETAILS_BACK_BUTTON,
+        hInstance,
+        nullptr
+    );
+    CreateProductDetailsAddToCartButton(parent, hInstance);
+}
+
+void CreateCartTotalText(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("STATIC"),
+        TEXT("Total: P0"),
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        545, 445, 210, 30,
+        parent,
+        (HMENU)ID_CART_TOTAL_TEXT,
+        hInstance,
+        nullptr
+    );
+}
+
 void CreateTitleText(HWND parent, HINSTANCE hInstance){
     HWND label = CreateWindowEx(
         0,
@@ -1127,8 +1613,119 @@ void CreateTitleText(HWND parent, HINSTANCE hInstance){
         30, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, TEXT("Segoe UI"));
+    if (font && label) {
+        SendMessage(label, WM_SETFONT, (WPARAM)font, TRUE);
+    }
+}
 
-    SendMessage(label, WM_SETFONT, (WPARAM)font, TRUE);
+void CreateCartList(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        WS_EX_CLIENTEDGE,
+        TEXT("LISTBOX"),
+        TEXT(""),
+        WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL | WS_TABSTOP |
+            LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
+        35, 60, 710, 365,
+        parent,
+        (HMENU)ID_CART_ITEMS_LIST,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateCartBackButton(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Back"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        10, 10, 90, 30,
+        parent,
+        (HMENU)ID_CART_BACK_BUTTON,
+        hInstance,
+        nullptr
+    );
+}
+void CreateCartQuantityButtons(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("-"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        35, 440, 45, 35,
+        parent,
+        (HMENU)ID_CART_QUANTITY_MINUS_BUTTON,
+        hInstance,
+        nullptr
+    );
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("+"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        90, 440, 45, 35,
+        parent,
+        (HMENU)ID_CART_QUANTITY_PLUS_BUTTON,
+        hInstance,
+        nullptr
+    );
+}
+
+void CreateCartForm(HWND parent, HINSTANCE hInstance){
+    CreateCartBackButton(parent, hInstance);
+    CreateCartList(parent, hInstance);
+    CreateCartQuantityButtons(parent, hInstance);
+    CreateCartTotalText(parent, hInstance);
+    RefreshCartList(parent);
+}
+
+static void RefreshCartList(HWND parent, int selectedIndex){
+    HWND list = GetDlgItem(parent, ID_CART_ITEMS_LIST);
+    if (!list) {
+        return;
+    }
+
+    SendMessage(list, LB_RESETCONTENT, 0, 0);
+    long long grandTotal = 0;
+    for (size_t index = 0; index < cartItemVector.size(); ++index) {
+        cartItem& item = cartItemVector[index];
+        item.totalPrice = item.orderProductPrice * item.quantity;
+        grandTotal += item.totalPrice;
+
+        std::string normalizedId = item.orderProductId;
+        normalizedId.erase(std::remove_if(normalizedId.begin(), normalizedId.end(), [](unsigned char ch) {
+            return !std::isdigit(ch);
+        }), normalizedId.end());
+        if (normalizedId.empty()) {
+            normalizedId = "001";
+        }
+
+        std::string row = item.orderProductName + " | ID: " + normalizedId +
+            " | Qty: " + std::to_string(item.quantity) +
+            " | Unit: P" + FormatCartPrice(item.orderProductPrice) +
+            " | Total: P" + FormatCartPrice(item.totalPrice);
+        SendMessageA(list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(row.c_str()));
+    }
+    SendMessage(list, LB_SETHORIZONTALEXTENT, 1800, 0);
+    if (selectedIndex >= 0 && selectedIndex < static_cast<int>(cartItemVector.size())) {
+        SendMessage(list, LB_SETCURSEL, selectedIndex, 0);
+    } else if (!cartItemVector.empty()) {
+        SendMessage(list, LB_SETCURSEL, 0, 0);
+    }
+
+    HWND totalLabel = GetDlgItem(parent, ID_CART_TOTAL_TEXT);
+    if (totalLabel) {
+        std::string totalText = "Total: P" + FormatCartPrice(grandTotal);
+        SetWindowTextA(totalLabel, totalText.c_str());
+    }
+}
+
+static std::string FormatCartPrice(long long price){
+    std::string formattedPrice = std::to_string(price);
+    for (size_t position = formattedPrice.length(); position > 3; position -= 3) {
+        formattedPrice.insert(position - 3, ",");
+    }
+    return formattedPrice;
 }
 
 void CreateNextButton(HWND parent, HINSTANCE hInstance){
@@ -1518,7 +2115,7 @@ void CreateMainMenuTitleText(HWND parent, HINSTANCE hInstance){
 }
 
 void CreateMainMenuBalanceText(HWND parent, HINSTANCE hInstance){
-    std::string balance = "BALANCE: P" + std::to_string(userInformationMap[currentUser].curUserBalance);
+    std::string balance = "BALANCE: P" + FormatCartPrice(userInformationMap[currentUser].curUserBalance);
     HWND label = CreateWindowExA(
         0,
         "STATIC",
@@ -1526,7 +2123,7 @@ void CreateMainMenuBalanceText(HWND parent, HINSTANCE hInstance){
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         630, 50, 250, 30,
         parent,
-        nullptr,
+        (HMENU)ID_MAIN_MENU_BALANCE_TEXT,
         hInstance,
         nullptr
     );
@@ -1537,6 +2134,20 @@ void CreateMainMenuBalanceText(HWND parent, HINSTANCE hInstance){
         DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, TEXT("Segoe UI"));
 
     SendMessage(label, WM_SETFONT, (WPARAM)font, TRUE);
+}
+
+void CreateMainMenuDepositButton(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Deposit"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        630, 80, 90, 25,
+        parent,
+        (HMENU)ID_MAIN_MENU_DEPOSIT_BUTTON,
+        hInstance,
+        nullptr
+    );
 }
 
 void MainMenuExit(HWND hwnd){
@@ -1551,6 +2162,7 @@ void CreateMainMenuForm(HWND parent, HINSTANCE hInstance){
     CreateMainMenuMoreButton(parent, hInstance);
     CreateMainMenuGreetingsText(parent, hInstance);
     CreateMainMenuBalanceText(parent, hInstance);
+    CreateMainMenuDepositButton(parent, hInstance);
     CreateMainMenuTitleText(parent, hInstance);
 }
 
@@ -1837,6 +2449,43 @@ void CreateProfileForm(HWND parent, HINSTANCE hInstance){
     CreateProfileBackButton(parent, hInstance);
 }
 
+void CreateProductDetailsAddToCartButton(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("STATIC"),
+        TEXT("Quantity:"),
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        390, 430, 70, 25,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+    CreateWindowEx(
+        0,
+        TEXT("EDIT"),
+        TEXT("1"),
+        WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
+        465, 425, 80, 28,
+        parent,
+        (HMENU)ID_PRODUCT_DETAILS_QUANTITY_EDIT,
+        hInstance,
+        nullptr
+    );
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Add to Cart"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        390, 465, 120, 40,
+        parent,
+        (HMENU)ID_PRODUCT_DETAILS_ADD_TO_CART_BUTTON,
+        hInstance,
+        nullptr
+    );
+
+}
+
 void LoadUsers(){
     userMap.clear();
     std::ifstream file("users&passwords.txt");
@@ -1943,6 +2592,24 @@ void LoadCurrentUserDetails(){
     userInformationMap[currentUser] = details;
 }
 
+bool SaveCurrentUserDetails(){
+    auto details = userInformationMap.find(currentUser);
+    if (details == userInformationMap.end()) {
+        return false;
+    }
+
+    std::ofstream file("User Informations/" + currentUser + ".txt");
+    if (!file) {
+        return false;
+    }
+
+    file << "Username: " << currentUser << '\n'
+         << "Password: " << details->second.curUserPassword << '\n'
+         << "Balance: " << details->second.curUserBalance << '\n'
+         << "Transactions: " << details->second.curUserTransactions << '\n';
+    return static_cast<bool>(file);
+}
+
 void RegisterUser(){
     CreateUserInformationTextFile();
     CreateUserLogsTextFile();
@@ -1978,7 +2645,7 @@ void CreateUserInformationTextFile(){
     file << "Username: " << currentUser << '\n'
          << "Password: " << user->second << '\n'
          << "Balance: 0\n"
-         << "Transations: 0\n";
+            << "Transactions: 0\n";
 }
 
 void CreateUserLogsTextFile(){
@@ -2019,6 +2686,77 @@ void LoadUserTransactionHistory(){
 
     while(std::getline(file, line)){
         transactions.push_back(line);
+    }
+}
+
+void LoadProductDetails(){
+    productInformationMap.clear();
+    for (size_t i = 0; i < gProductIds.size() && i < gProductNames.size(); ++i) {
+        const std::string& productId = gProductIds[i];
+        std::string normalizedId = productId;
+        normalizedId.erase(std::remove_if(normalizedId.begin(), normalizedId.end(), [](unsigned char ch) {
+            return !std::isdigit(ch);
+        }), normalizedId.end());
+        if (normalizedId.empty()) {
+            normalizedId = "001";
+        }
+
+        productInformation details{};
+        details.productId = normalizedId;
+        details.productName = gProductNames[i];
+        details.productFlowerType = "Not available.";
+        details.productDescription = "No additional details available.";
+
+        const std::string filePath = "Product Informations/Product Details/" + normalizedId + ".txt";
+        std::ifstream file(filePath);
+        std::string line;
+        while (std::getline(file, line)) {
+            if (!line.empty() && line.back() == '\r') {
+                line.pop_back();
+            }
+            const size_t delimiter = line.find(':');
+            if (delimiter == std::string::npos) {
+                continue;
+            }
+
+            std::string field = line.substr(0, delimiter);
+            if (field.compare(0, 3, "\xEF\xBB\xBF") == 0) {
+                field.erase(0, 3);
+            }
+            const size_t fieldStart = field.find_first_not_of(" \t");
+            if (fieldStart != std::string::npos) {
+                field.erase(0, fieldStart);
+            }
+            const size_t fieldEnd = field.find_last_not_of(" \t");
+            if (fieldEnd != std::string::npos) {
+                field.erase(fieldEnd + 1);
+            }
+
+            std::string value = line.substr(delimiter + 1);
+            const size_t valueStart = value.find_first_not_of(" \t");
+            if (valueStart == std::string::npos) {
+                value.clear();
+            } else {
+                value.erase(0, valueStart);
+            }
+
+            if (field == "Price" || field == "Cost") {
+                value.erase(std::remove_if(value.begin(), value.end(), [](unsigned char ch) {
+                    return !std::isdigit(ch);
+                }), value.end());
+                try {
+                    details.productPrice = value.empty() ? 0 : std::stoll(value);
+                } catch (...) {
+                    details.productPrice = 0;
+                }
+            } else if (field == "Flower Type") {
+                details.productFlowerType = value;
+            } else if (field == "Description") {
+                details.productDescription = value;
+            }
+        }
+
+        productInformationMap[normalizedId] = details;
     }
 }
 
