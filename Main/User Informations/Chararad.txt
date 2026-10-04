@@ -1,4 +1,4 @@
 Username: Chararad
 Password: Rainne01
-Balance: 30069
-Purchases: 0
+Balance: 28069
+Purchases: 1

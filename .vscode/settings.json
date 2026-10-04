@@ -1,6 +1,0 @@
-{
-  "editor.inlineSuggest.enabled": true,
-  "supermaven.enable": {
-    "*": true
-  }
-}

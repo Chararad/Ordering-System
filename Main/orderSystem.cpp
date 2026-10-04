@@ -50,8 +50,12 @@ using namespace Gdiplus;
 #define ID_DEPOSIT_AMOUNT_EDIT 131
 #define ID_DEPOSIT_SUBMIT_BUTTON 132
 #define ID_DEPOSIT_BACK_BUTTON 133
+#define ID_TRANSACTION_HISTORY_LIST 137
 #define ID_RECEIPT_TEXT 135
 #define ID_RECEIPT_CONTINUE_BUTTON 136
+#define ID_CHECKOUT_BACK_BUTTON 138
+#define ID_CHECKOUT_CONFIRM_BUTTON 139
+#define ID_CHECKOUT_PAYMENT_COMBO 140
 #define ID_PRODUCT_BUTTON_BASE 2000
 #define WM_PRODUCT_BITMAP_READY (WM_APP + 1)
 
@@ -86,10 +90,11 @@ HWND CreateMoreWindow(HINSTANCE hInstance);
 HWND CreateProfileWindow(HINSTANCE hInstance, HWND moreWindow);
 HWND CreateAboutUsWindow(HINSTANCE hInstance, HWND moreWindow);
 HWND CreateTransactionHistoryWindow(HINSTANCE hInstance, HWND moreWindow);
-HWND CreateCheckOutWindow(HINSTANCE hInstance);
+HWND CreateCheckOutWindow(HINSTANCE hInstance, HWND returnWindow = nullptr);
 HWND CreateReceiptWindow(HINSTANCE hInstance, const std::string& receiptText, HWND returnWindow);
 HWND CreateProductDetailsWindow(HINSTANCE hInstance);
 HWND CreateDepositWindow(HINSTANCE hInstance, HWND mainMenu);
+void CreateCheckOutForm(HWND parent, HINSTANCE hInstance);
 void CreateTitleText(HWND parent, HINSTANCE hInstance);
 void CreateNextButton(HWND parent, HINSTANCE hInstance);
 void CreateLogInButton(HWND parent, HINSTANCE hInstance);
@@ -134,9 +139,10 @@ void CreateProfileBackButton(HWND parent, HINSTANCE hInstance);
 void CreateAboutUsText(HWND parent, HINSTANCE hInstance);
 void CreateAboutUsBackButton(HWND parent, HINSTANCE hInstance);
 void CreateAboutUsForm(HWND parent, HINSTANCE hInstance);
-void CreateTransactionHistoryText(HWND parent, HINSTANCE hInstance);
+void CreateTransactionHistoryList(HWND parent, HINSTANCE hInstance);
 void CreateTransactionHistoryBackButton(HWND parent, HINSTANCE hInstance);
 void CreateTransactionHistoryForm(HWND parent, HINSTANCE hInstance);
+void LoadReceiptHistoryEntries(HWND list);
 void CreateProductDetailsForm(HWND parent, HINSTANCE hInstance, int productIndex);
 void CreateProfileForm(HWND parent, HINSTANCE hInstance);
 void CreateProductDetailsAddToCartButton(HWND parent, HINSTANCE hInstance);
@@ -162,6 +168,8 @@ void CreateUserTransactionHistoryTextFile();
 void LoadUserTransactionHistory();
 std::string ToString(const TCHAR* str);
 std::string CreateTimeStamp();
+void EndUserSession(const std::string& event);
+void HandleApplicationWindowDestroy();
 
 //Static Variables
 static HBRUSH gBackgroundBrush = CreateSolidBrush(RGB(255, 192, 203));
@@ -179,6 +187,7 @@ static ULONG_PTR gGdiplusToken = 0;
 static HANDLE gProductLoaderThread = nullptr;
 static std::vector<HBITMAP> gProductBitmaps;
 static bool gNavigationDestroy = false;
+static bool gUserSessionActive = false;
 static HWND gProductDetailsMainMenu = nullptr;
 
 static void DestroyWindowForNavigation(HWND hwnd) {
@@ -215,12 +224,21 @@ struct cartItem{
     long long totalPrice;
 };
 
+struct orderDetail{
+    std::string orderId;
+    std::string orderDate;
+    std::string paymentMethod;
+    long long totalAmount = 0;
+    std::string receiptFilePath;
+};
+
 //Global Variables
 std::map<std::string, std::string> userMap;
 std::map<std::string, userInformation> userInformationMap;
 std::map<std::string, productInformation> productInformationMap;
 std::vector<cartItem> cartItemVector;
 std::vector<std::string> transactions;
+std::vector<std::string> gReceiptListPaths;
 std::vector<std::string> gProductNames;
 std::vector<std::string> gProductIds;
 std::string currentUser;
@@ -525,7 +543,7 @@ LRESULT CALLBACK LandingWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
             return 0;
 
         case WM_DESTROY:
-            if (!gNavigationDestroy) PostQuitMessage(0);
+            HandleApplicationWindowDestroy();
             return 0;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -550,7 +568,7 @@ LRESULT CALLBACK LoginRegisterWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             return 0;
 
         case WM_DESTROY:
-            if (!gNavigationDestroy) PostQuitMessage(0);
+            HandleApplicationWindowDestroy();
             return 0;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -610,7 +628,7 @@ LRESULT CALLBACK LogInWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
             return 0;
 
         case WM_DESTROY:
-            if (!gNavigationDestroy) PostQuitMessage(0);
+            HandleApplicationWindowDestroy();
             return 0;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -678,7 +696,7 @@ LRESULT CALLBACK RegisterWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM 
             return 0;
 
         case WM_DESTROY:
-            if (!gNavigationDestroy) PostQuitMessage(0);
+            HandleApplicationWindowDestroy();
             return 0;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -705,6 +723,7 @@ LRESULT CALLBACK MainMenuWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM 
             if (LOWORD(wParam) == ID_MAIN_MENU_EXIT_BUTTON && HIWORD(wParam) == BN_CLICKED) {
                 MainMenuExit(hwnd);
             } else if (LOWORD(wParam) == ID_MAIN_MENU_LOG_OUT_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                EndUserSession("Account Logged Out");
                 DestroyWindowForNavigation(hwnd);
                 HWND loginRegisterWindow = CreateLoginRegisterWindow(GetModuleHandle(nullptr));
                 CreateLogInButton(loginRegisterWindow, GetModuleHandle(nullptr));
@@ -808,7 +827,7 @@ LRESULT CALLBACK MainMenuWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM 
         }
 
         case WM_DESTROY:
-            if (!gNavigationDestroy) PostQuitMessage(0);
+            HandleApplicationWindowDestroy();
             return 0;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -854,9 +873,10 @@ LRESULT CALLBACK CartWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                     MessageBox(hwnd, TEXT("Your cart is empty."), TEXT("Check Out"), MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                HWND checkOutWindow = CreateCheckOutWindow(GetModuleHandle(nullptr));
+                HWND checkOutWindow = CreateCheckOutWindow(GetModuleHandle(nullptr), hwnd);
                 if (checkOutWindow) {
-                    DestroyWindowForNavigation(hwnd);
+                    ShowWindow(hwnd, SW_HIDE);
+                    CreateCheckOutForm(checkOutWindow, GetModuleHandle(nullptr));
                     ShowWindow(checkOutWindow, SW_SHOW);
                 }
                 return 0;
@@ -884,7 +904,7 @@ LRESULT CALLBACK CartWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         }
 
         case WM_DESTROY:
-            if (!gNavigationDestroy) PostQuitMessage(0);
+            HandleApplicationWindowDestroy();
             return 0;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -1033,7 +1053,7 @@ LRESULT CALLBACK DepositWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
             return 0;
 
         case WM_DESTROY:
-            if (!gNavigationDestroy) PostQuitMessage(0);
+            HandleApplicationWindowDestroy();
             return 0;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -1068,7 +1088,7 @@ LRESULT CALLBACK MoreWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             }
             return 0;
         case WM_DESTROY:
-            if (!gNavigationDestroy) PostQuitMessage(0);
+            HandleApplicationWindowDestroy();
             return 0;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -1113,7 +1133,7 @@ LRESULT CALLBACK ProfileWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
                     DeleteObject(bitmap);
                 }
             }
-            if (!gNavigationDestroy) PostQuitMessage(0);
+            HandleApplicationWindowDestroy();
             return 0;
         }
     }
@@ -1153,7 +1173,7 @@ LRESULT CALLBACK AboutUsWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
             return 0;
         }
         case WM_DESTROY: {
-            if (!gNavigationDestroy) PostQuitMessage(0);
+            HandleApplicationWindowDestroy();
             return 0;
         }
     }
@@ -1168,6 +1188,35 @@ LRESULT CALLBACK TransactionHistoryWindowProc(HWND hwnd, UINT uMsg, WPARAM wPara
                 DestroyWindowForNavigation(hwnd);
                 if (moreWindow) {
                     ShowWindow(moreWindow, SW_SHOW);
+                }
+                return 0;
+            }
+            if (LOWORD(wParam) == ID_TRANSACTION_HISTORY_LIST && HIWORD(wParam) == LBN_DBLCLK) {
+                HWND list = GetDlgItem(hwnd, ID_TRANSACTION_HISTORY_LIST);
+                if (!list) {
+                    return 0;
+                }
+                const int selectedIndex = static_cast<int>(SendMessage(list, LB_GETCURSEL, 0, 0));
+                if (selectedIndex == LB_ERR || selectedIndex < 0 || selectedIndex >= static_cast<int>(gReceiptListPaths.size())) {
+                    return 0;
+                }
+
+                std::ifstream receiptFile(gReceiptListPaths[selectedIndex]);
+                std::string receiptText;
+                std::string line;
+                while (std::getline(receiptFile, line)) {
+                    if (!line.empty() && line.back() == '\r') {
+                        line.pop_back();
+                    }
+                    receiptText += line + "\r\n";
+                }
+                if (receiptText.empty()) {
+                    receiptText = "No receipt details available.";
+                }
+
+                HWND receiptWindow = CreateReceiptWindow(GetModuleHandle(nullptr), receiptText, hwnd);
+                if (receiptWindow) {
+                    ShowWindow(receiptWindow, SW_SHOW);
                 }
                 return 0;
             }
@@ -1194,7 +1243,7 @@ LRESULT CALLBACK TransactionHistoryWindowProc(HWND hwnd, UINT uMsg, WPARAM wPara
         }
 
         case WM_DESTROY:
-            if (!gNavigationDestroy) PostQuitMessage(0);
+            HandleApplicationWindowDestroy();
             return 0;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -1292,7 +1341,7 @@ LRESULT CALLBACK ProductDetailsWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, L
                     DeleteObject(bitmap);
                 }
             }
-            if (!gNavigationDestroy) PostQuitMessage(0);
+            HandleApplicationWindowDestroy();
             return 0;
         }
 
@@ -1310,6 +1359,97 @@ LRESULT CALLBACK ProductViewportWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
 
 LRESULT CALLBACK CheckOutWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
     switch(uMsg){
+        case WM_COMMAND:
+            if (LOWORD(wParam) == ID_CHECKOUT_BACK_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                HWND returnWindow = reinterpret_cast<HWND>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+                DestroyWindowForNavigation(hwnd);
+                if (returnWindow && IsWindow(returnWindow)) {
+                    ShowWindow(returnWindow, SW_SHOW);
+                } else {
+                    HWND cartWindow = CreateCartWindow(GetModuleHandle(nullptr));
+                    CreateCartForm(cartWindow, GetModuleHandle(nullptr));
+                    ShowWindow(cartWindow, SW_SHOW);
+                }
+                return 0;
+            }
+            if (LOWORD(wParam) == ID_CHECKOUT_CONFIRM_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                if (cartItemVector.empty()) {
+                    MessageBox(hwnd, TEXT("Your cart is empty."), TEXT("Checkout"), MB_OK | MB_ICONWARNING);
+                    return 0;
+                }
+
+                long long totalAmount = 0;
+                for (const auto& item : cartItemVector) {
+                    totalAmount += item.totalPrice;
+                }
+
+                HWND paymentCombo = GetDlgItem(hwnd, ID_CHECKOUT_PAYMENT_COMBO);
+                int paymentIndex = paymentCombo ? static_cast<int>(SendMessage(paymentCombo, CB_GETCURSEL, 0, 0)) : 0;
+                const std::string paymentMethod = (paymentIndex == 1) ? "Credit" : "Cash";
+
+                auto userDetails = userInformationMap.find(currentUser);
+                if (userDetails == userInformationMap.end()) {
+                    MessageBox(hwnd, TEXT("Could not find this account."), TEXT("Checkout"), MB_OK | MB_ICONERROR);
+                    return 0;
+                }
+
+                if (paymentMethod == "Cash" && userDetails->second.curUserBalance < totalAmount) {
+                    MessageBox(hwnd, TEXT("Insufficient balance for cash payment."), TEXT("Checkout"), MB_OK | MB_ICONWARNING);
+                    return 0;
+                }
+
+                const std::string timestamp = CreateTimeStamp();
+                const std::string orderId = "ORD-" + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+                std::string receiptText = "FLOWER SHOP ORDER RECEIPT\r\n\r\n";
+                receiptText += "Receipt ID: " + orderId + "\r\n";
+                receiptText += "Customer: " + currentUser + "\r\n";
+                receiptText += "Date: " + timestamp + "\r\n";
+                receiptText += "Payment Method: " + paymentMethod + "\r\n";
+                receiptText += "Payment Status: " + std::string(paymentMethod == "Cash" ? "Paid Immediately" : "Confirmed") + "\r\n\r\n";
+                receiptText += "Items:\r\n";
+                for (const auto& item : cartItemVector) {
+                    receiptText += "- " + item.orderProductName + " x" + std::to_string(item.quantity) + " @ P" + FormatCartPrice(item.orderProductPrice) + " = P" + FormatCartPrice(item.totalPrice) + "\r\n";
+                }
+                receiptText += "\r\nTotal: P" + FormatCartPrice(totalAmount) + "\r\n";
+                receiptText += "Status: Successful\r\n";
+
+                if (paymentMethod == "Cash") {
+                    userDetails->second.curUserBalance -= totalAmount;
+                }
+
+                long long purchaseCount = 0;
+                try {
+                    purchaseCount = std::stoll(userDetails->second.curUserPurchases);
+                } catch (...) {
+                    purchaseCount = 0;
+                }
+                userDetails->second.curUserPurchases = std::to_string(purchaseCount + 1);
+
+                if (!SaveReceiptTextFile(orderId, receiptText)) {
+                    MessageBox(hwnd, TEXT("Could not save the receipt."), TEXT("Checkout"), MB_OK | MB_ICONERROR);
+                    return 0;
+                }
+
+                if (!SaveCurrentUserDetails()) {
+                    MessageBox(hwnd, TEXT("Could not save the updated account."), TEXT("Checkout"), MB_OK | MB_ICONERROR);
+                    return 0;
+                }
+
+                std::ofstream historyFile("User Transaction History/" + currentUser + ".txt", std::ios::app);
+                if (historyFile) {
+                    historyFile << timestamp << " - Order " << orderId << " - " << paymentMethod << " - P" << FormatCartPrice(totalAmount) << '\n';
+                }
+
+                HWND receiptWindow = CreateReceiptWindow(GetModuleHandle(nullptr), receiptText, nullptr);
+                DestroyWindowForNavigation(hwnd);
+                cartItemVector.clear();
+                if (receiptWindow) {
+                    ShowWindow(receiptWindow, SW_SHOW);
+                }
+                return 0;
+            }
+            return 0;
+
         case WM_ERASEBKGND: {
             HDC hdc = (HDC)wParam;
             RECT rect;
@@ -1331,7 +1471,7 @@ LRESULT CALLBACK CheckOutWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM 
         }
 
         case WM_DESTROY:
-            if (!gNavigationDestroy) PostQuitMessage(0);
+            HandleApplicationWindowDestroy();
             return 0;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -1375,7 +1515,7 @@ LRESULT CALLBACK ReceiptWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
             return 0;
 
         case WM_DESTROY:
-            if (!gNavigationDestroy) PostQuitMessage(0);
+            HandleApplicationWindowDestroy();
             return 0;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -1566,8 +1706,8 @@ HWND CreateTransactionHistoryWindow(HINSTANCE hInstance, HWND moreWindow){
     return historyWindow;
 }
 
-HWND CreateCheckOutWindow(HINSTANCE hInstance){
-    return CreateWindowEx(
+HWND CreateCheckOutWindow(HINSTANCE hInstance, HWND returnWindow){
+    HWND checkoutWindow = CreateWindowEx(
         0,
         TEXT("CheckOutPage"),
         TEXT("Check Out"),
@@ -1578,6 +1718,108 @@ HWND CreateCheckOutWindow(HINSTANCE hInstance){
         600,
         nullptr,
         nullptr,
+        hInstance,
+        nullptr
+    );
+    if (checkoutWindow) {
+        SetWindowLongPtr(checkoutWindow, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(returnWindow));
+    }
+    return checkoutWindow;
+}
+
+void CreateCheckOutForm(HWND parent, HINSTANCE hInstance){
+    CreateWindowExA(
+        0,
+        "STATIC",
+        "ORDER CONFIRMATION",
+        WS_CHILD | WS_VISIBLE | SS_CENTER,
+        220, 20, 360, 35,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+
+    long long totalAmount = 0;
+    for (const auto& item : cartItemVector) {
+        totalAmount += item.totalPrice;
+    }
+
+    std::string totalText = "Total: P" + FormatCartPrice(totalAmount);
+    CreateWindowExA(
+        0,
+        "STATIC",
+        totalText.c_str(),
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        80, 90, 220, 30,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+
+    CreateWindowExA(
+        0,
+        "STATIC",
+        "Payment Method:",
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        80, 150, 160, 30,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+
+    HWND paymentCombo = CreateWindowEx(
+        0,
+        TEXT("COMBOBOX"),
+        TEXT(""),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST,
+        240, 145, 180, 120,
+        parent,
+        (HMENU)ID_CHECKOUT_PAYMENT_COMBO,
+        hInstance,
+        nullptr
+    );
+    if (paymentCombo) {
+        SendMessage(paymentCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(TEXT("Cash")));
+        SendMessage(paymentCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(TEXT("Credit")));
+        SendMessage(paymentCombo, CB_SETCURSEL, 0, 0);
+    }
+
+    const std::string itemSummary = "Items in cart: " + std::to_string(cartItemVector.size());
+    CreateWindowExA(
+        0,
+        "STATIC",
+        itemSummary.c_str(),
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        80, 200, 300, 30,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Back"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        80, 500, 120, 40,
+        parent,
+        (HMENU)ID_CHECKOUT_BACK_BUTTON,
+        hInstance,
+        nullptr
+    );
+
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Confirm Order"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        600, 500, 120, 40,
+        parent,
+        (HMENU)ID_CHECKOUT_CONFIRM_BUTTON,
         hInstance,
         nullptr
     );
@@ -1623,11 +1865,12 @@ HWND CreateReceiptWindow(HINSTANCE hInstance, const std::string& receiptText, HW
         SendMessage(titleLabel, WM_SETFONT, (WPARAM)titleFont, TRUE);
     }
 
-    HWND bodyLabel = CreateWindowExA(
+    HWND bodyEdit = CreateWindowExA(
         0,
-        "STATIC",
+        "EDIT",
         receiptText.c_str(),
-        WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTER | SS_NOTIFY,
+        WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL | ES_MULTILINE |
+            ES_AUTOVSCROLL | ES_READONLY | ES_LEFT | ES_CENTER,
         80, 80, 640, 390,
         receiptWindow,
         (HMENU)ID_RECEIPT_TEXT,
@@ -1638,8 +1881,9 @@ HWND CreateReceiptWindow(HINSTANCE hInstance, const std::string& receiptText, HW
         18, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, TEXT("Segoe UI"));
-    if (bodyLabel && bodyFont) {
-        SendMessage(bodyLabel, WM_SETFONT, (WPARAM)bodyFont, TRUE);
+    if (bodyEdit && bodyFont) {
+        SendMessage(bodyEdit, WM_SETFONT, (WPARAM)bodyFont, TRUE);
+        SendMessage(bodyEdit, EM_SETSEL, 0, 0);
     }
 
     CreateWindowEx(
@@ -2414,6 +2658,7 @@ void CreateMainMenuDepositButton(HWND parent, HINSTANCE hInstance){
 }
 
 void MainMenuExit(HWND hwnd){
+    EndUserSession("Application Exited");
     PostQuitMessage(0);
 }
 
@@ -2535,36 +2780,62 @@ void CreateAboutUsForm(HWND parent, HINSTANCE hInstance){
     CreateAboutUsBackButton(parent, hInstance);
 }
 
-void CreateTransactionHistoryText(HWND parent, HINSTANCE hInstance){
-    std::ifstream file("User Transaction History/" + currentUser + ".txt");
-    std::string historyText;
-    std::string line;
-    while (std::getline(file, line)) {
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-        }
-        historyText += line + "\r\n";
-    }
-    if (historyText.empty()) {
-        historyText = "No transaction history available.";
+void LoadReceiptHistoryEntries(HWND list){
+    gReceiptListPaths.clear();
+    SendMessage(list, LB_RESETCONTENT, 0, 0);
+
+    const std::filesystem::path receiptFolder = std::filesystem::path("Receipts") / currentUser;
+    if (!std::filesystem::exists(receiptFolder) || !std::filesystem::is_directory(receiptFolder)) {
+        SendMessageA(list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>("No receipts available."));
+        return;
     }
 
-    CreateWindowExA(
+    std::vector<std::string> files;
+    for (const auto& entry : std::filesystem::directory_iterator(receiptFolder)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".txt") {
+            files.push_back(entry.path().string());
+        }
+    }
+    std::sort(files.begin(), files.end());
+
+    if (files.empty()) {
+        SendMessageA(list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>("No receipts available."));
+        return;
+    }
+
+    for (const auto& filePath : files) {
+        std::filesystem::path path(filePath);
+        std::string displayName = path.filename().string();
+        const std::string extension = ".txt";
+        if (displayName.size() >= extension.size() &&
+            displayName.compare(displayName.size() - extension.size(), extension.size(), extension) == 0) {
+            displayName.erase(displayName.size() - extension.size());
+        }
+        gReceiptListPaths.push_back(filePath);
+        SendMessageA(list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(displayName.c_str()));
+    }
+}
+
+void CreateTransactionHistoryList(HWND parent, HINSTANCE hInstance){
+    HWND list = CreateWindowEx(
         WS_EX_CLIENTEDGE,
-        "EDIT",
-        historyText.c_str(),
-        WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL |
-            ES_READONLY | ES_LEFT | WS_TABSTOP,
-        40, 60, 700, 450,
+        TEXT("LISTBOX"),
+        TEXT(""),
+        WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP |
+            LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
+        35, 60, 700, 450,
         parent,
-        nullptr,
+        (HMENU)ID_TRANSACTION_HISTORY_LIST,
         hInstance,
         nullptr
     );
+    if (list) {
+        LoadReceiptHistoryEntries(list);
+    }
 }
 
 void CreateTransactionHistoryForm(HWND parent, HINSTANCE hInstance){
-    CreateTransactionHistoryText(parent, hInstance);
+    CreateTransactionHistoryList(parent, hInstance);
     CreateTransactionHistoryBackButton(parent, hInstance);
 }
 
@@ -2897,12 +3168,39 @@ void RegisterUser(){
     CreateUserLogsTextFile();
     CreateUserTransactionHistoryTextFile();
     CreateUserReceiptFolder();
+    gUserSessionActive = true;
 }
 
 void LoginUser(){
     LoginUserLogs();
     LoadUserTransactionHistory();
     CreateUserReceiptFolder();
+    gUserSessionActive = true;
+}
+
+void EndUserSession(const std::string& event){
+    if (!gUserSessionActive || currentUser.empty()) {
+        return;
+    }
+
+    gUserSessionActive = false;
+    std::ofstream file("User Logs/" + currentUser + ".txt", std::ios::app);
+    if (!file) {
+        OutputDebugStringA("Unable to append to the user log.\n");
+        return;
+    }
+
+    file << CreateTimeStamp() << " - " << event << '\n';
+    if (!file) {
+        OutputDebugStringA("Unable to write the user session event to the log.\n");
+    }
+}
+
+void HandleApplicationWindowDestroy(){
+    if (!gNavigationDestroy) {
+        EndUserSession("Application Exited");
+        PostQuitMessage(0);
+    }
 }
 
 void CreateUserReceiptFolder(){
