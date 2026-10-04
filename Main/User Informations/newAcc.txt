@@ -1,4 +1,4 @@
 Username: newAcc
 Password: hahhahahahah
 Balance: 0
-Transations: 0
+Purchases: 0

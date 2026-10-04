@@ -1,4 +1,4 @@
 Username: fixthing
 Password: debugging
 Balance: 0
-Transactions: 0
+Purchases: 0
