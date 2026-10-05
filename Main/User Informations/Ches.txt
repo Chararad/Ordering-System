@@ -1,0 +1,4 @@
+Username: Ches
+Password: 12345
+Balance: 5000
+Purchases: 2
