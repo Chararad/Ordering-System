@@ -1,0 +1,16 @@
+FLOWER SHOP ORDER RECEIPT
+
+Receipt ID: ORD-1791172913196
+Customer: Ches
+Date: Mon Oct  5 12:01:53 2026
+Payment Method: Credit
+Payment Status: Confirmed
+
+Items:
+- Cloud Nine x1 @ P1,500 = P1,500
+- Fiesta Garden x1 @ P3,200 = P3,200
+- Crimson Devotion x1 @ P2,800 = P2,800
+- Fuchsia Muse x1 @ P1,600 = P1,600
+
+Total: P9,100
+Status: Successful
