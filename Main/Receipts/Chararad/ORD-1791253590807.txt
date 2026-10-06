@@ -1,0 +1,13 @@
+FLOWER SHOP ORDER RECEIPT
+
+Receipt ID: ORD-1791253590807
+Customer: Chararad
+Date: Tue Oct  6 10:26:30 2026
+Payment Method: Credit
+Payment Status: Confirmed
+
+Items:
+- Blue Lagoon x6 @ P2,100 = P12,600
+
+Total: P12,600
+Status: Successful

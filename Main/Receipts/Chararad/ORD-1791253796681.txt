@@ -1,0 +1,13 @@
+FLOWER SHOP ORDER RECEIPT
+
+Receipt ID: ORD-1791253796681
+Customer: Chararad
+Date: Tue Oct  6 10:29:56 2026
+Payment Method: Cash
+Payment Status: Paid Immediately
+
+Items:
+- Blush Meadow x15 @ P1,800 = P27,000
+
+Total: P27,000
+Status: Successful
