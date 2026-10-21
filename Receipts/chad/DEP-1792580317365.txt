@@ -1,0 +1,9 @@
+FLOWER SHOP DEPOSIT RECEIPT
+
+Receipt ID: DEP-1792580317365
+Date: Wed Oct 21 18:58:37 2026
+Customer: chad
+Transaction: Deposit
+Amount Received: P1,000
+New Balance: P1,000
+Status: Successful

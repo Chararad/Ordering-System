@@ -1,0 +1,21 @@
+Blue Lagoon|001
+Blush Meadow|002
+Cloud Nine|003
+Coral Romance|004
+Crimson Devotion|005
+Fiesta Garden|006
+Fuchsia Muse|007
+Golden Hour Lily|008
+Ivory Whisper|009
+Lace & Love|010
+Midnight Ivory|011
+Ocean Breeze||012
+Peach Sorbet|013
+Petal Kiss|014
+Pink Daisy Delight|015
+Pink Serenade|016
+Powder Puff|017
+Rose Rhapsody|018
+Rustic Rose|019
+Sweet Ribbons|020
+

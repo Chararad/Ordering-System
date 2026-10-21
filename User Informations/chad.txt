@@ -1,0 +1,4 @@
+Username: chad
+Password: hhhh
+Balance: 1000
+Purchases: 1

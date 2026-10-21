@@ -1,0 +1,13 @@
+FLOWER SHOP ORDER RECEIPT
+
+Receipt ID: ORD-1792580332846
+Customer: chad
+Date: Wed Oct 21 18:58:52 2026
+Payment Method: Cash
+Payment Status: Paid Immediately
+
+Items:
+- Cloud Nine x1 @ P1,500 = P1,500
+
+Total: P1,500
+Status: Successful
