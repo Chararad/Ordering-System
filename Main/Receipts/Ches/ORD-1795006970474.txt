@@ -1,0 +1,15 @@
+FLOWER SHOP ORDER RECEIPT
+
+Receipt ID: ORD-1795006970474
+Customer: Ches
+Date: Wed Nov 18 21:02:50 2026
+Payment Method: Credit
+Payment Status: Charged to Credit (Added to Outstanding Debt)
+
+Items:
+- Cloud Nine x1 @ P1,500 = P1,500
+
+Total: P1,500
+Outstanding Debt: P1,500
+Remaining Credit: P8,500
+Status: Successful

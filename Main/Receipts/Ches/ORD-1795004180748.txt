@@ -1,0 +1,13 @@
+FLOWER SHOP ORDER RECEIPT
+
+Receipt ID: ORD-1795004180748
+Customer: Ches
+Date: Wed Nov 18 20:16:20 2026
+Payment Method: Cash
+Payment Status: Paid Immediately
+
+Items:
+- Blue Lagoon x3 @ P2,100 = P6,300
+
+Total: P6,300
+Status: Successful

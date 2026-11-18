@@ -1,0 +1,13 @@
+FLOWER SHOP ORDER RECEIPT
+
+Receipt ID: ORD-1795004252892
+Customer: Ches
+Date: Wed Nov 18 20:17:32 2026
+Payment Method: Credit
+Payment Status: Balance Deducted
+
+Items:
+- Blush Meadow x1 @ P1,800 = P1,800
+
+Total: P1,800
+Status: Successful

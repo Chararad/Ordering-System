@@ -1,0 +1,13 @@
+FLOWER SHOP ORDER RECEIPT
+
+Receipt ID: ORD-1795004270716
+Customer: Ches
+Date: Wed Nov 18 20:17:50 2026
+Payment Method: Cash
+Payment Status: Paid Immediately
+
+Items:
+- Coral Romance x4 @ P2,200 = P8,800
+
+Total: P8,800
+Status: Successful

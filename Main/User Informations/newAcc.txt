@@ -2,3 +2,5 @@ Username: newAcc
 Password: hahhahahahah
 Balance: 0
 Purchases: 0
+Credit Limit: 10000
+Outstanding Debt: 0

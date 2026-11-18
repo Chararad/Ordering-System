@@ -57,6 +57,13 @@ using namespace Gdiplus;
 #define ID_CHECKOUT_BACK_BUTTON 138
 #define ID_CHECKOUT_CONFIRM_BUTTON 139
 #define ID_CHECKOUT_PAYMENT_COMBO 140
+#define ID_MORE_PAY_DEBT_BUTTON 141
+#define ID_PAY_DEBT_AMOUNT_EDIT 142
+#define ID_PAY_DEBT_SUBMIT_BUTTON 143
+#define ID_PAY_DEBT_BACK_BUTTON 144
+#define ID_CREDIT_LIMIT_TEXT 145
+#define ID_OUTSTANDING_DEBT_TEXT 146
+#define ID_REMAINING_CREDIT_TEXT 147
 #define ID_PRODUCT_BUTTON_BASE 2000
 #define WM_PRODUCT_BITMAP_READY (WM_APP + 1)
 
@@ -81,6 +88,7 @@ LRESULT CALLBACK CheckOutWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM 
 LRESULT CALLBACK ReceiptWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK ProductViewportWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK DepositWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+LRESULT CALLBACK PayDebtWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 HWND CreateLandingWindow(HINSTANCE hInstance);
 HWND CreateLoginRegisterWindow(HINSTANCE hInstance);
 HWND CreateLogInWindow(HINSTANCE hInstance);
@@ -95,6 +103,7 @@ HWND CreateCheckOutWindow(HINSTANCE hInstance, HWND returnWindow = nullptr);
 HWND CreateReceiptWindow(HINSTANCE hInstance, const std::string& receiptText, HWND returnWindow);
 HWND CreateProductDetailsWindow(HINSTANCE hInstance);
 HWND CreateDepositWindow(HINSTANCE hInstance, HWND mainMenu);
+HWND CreatePayDebtWindow(HINSTANCE hInstance, HWND moreWindow);
 void CreateCheckOutForm(HWND parent, HINSTANCE hInstance);
 void CreateTitleText(HWND parent, HINSTANCE hInstance);
 void CreateNextButton(HWND parent, HINSTANCE hInstance);
@@ -124,6 +133,10 @@ void CreateMainMenuTitleText(HWND parent, HINSTANCE hInstance);
 void CreateMainMenuBalanceText(HWND parent, HINSTANCE hInstance);
 void CreateMainMenuDepositButton(HWND parent, HINSTANCE hInstance);
 void CreateDepositForm(HWND parent, HINSTANCE hInstance);
+void CreatePayDebtForm(HWND parent, HINSTANCE hInstance);
+void CreateMorePayDebtButton(HWND parent, HINSTANCE hInstance);
+void CreateCreditInfoLabels(HWND parent, HINSTANCE hInstance, int x, int y);
+void UpdateCreditInfoLabels(HWND parent);
 void CreateMainMenuForm(HWND parent, HINSTANCE hInstance);
 void MainMenuExit(HWND hwnd);
 void CreateMoreAboutUsButton(HWND parent, HINSTANCE hInstance);
@@ -198,12 +211,18 @@ static void DestroyWindowForNavigation(HWND hwnd) {
 }
 static void RefreshCartList(HWND parent, int selectedIndex = -1);
 static std::string FormatCartPrice(long long price);
+static std::string CreateReceiptId(const std::string& receiptPrefix);
 
 //Structures
+//Credit limit given to every new account (it is saved per customer, so it can be changed for each one)
+const long long DEFAULT_CREDIT_LIMIT = 10000;
+
 struct userInformation{
     std::string curUserPassword;
-    long long curUserBalance;
+    long long curUserBalance;               //Cash balance (money the customer deposited)
     std::string curUserPurchases;
+    long long curUserCreditLimit;           //Most debt this customer is allowed to have
+    long long curUserOutstandingDebt;       //Credit purchases that are not yet paid
 };
 
 struct productInformation{
@@ -241,6 +260,224 @@ std::vector<std::string> gProductNames;
 std::vector<std::string> gProductIds;
 std::string currentUser;
 
+
+
+//==================== PAYMENT LOGIC ====================
+//These functions only work on numbers and the userInformation structure.
+//They do not use windows, so they are easy to read and to test.
+
+//Remaining credit = credit limit - outstanding debt (never below 0)
+long long GetRemainingCredit(const userInformation& user){
+    const long long remainingCredit = user.curUserCreditLimit - user.curUserOutstandingDebt;
+    return (remainingCredit > 0) ? remainingCredit : 0;
+}
+
+//Adds up the total price of everything in the cart
+long long GetCartTotal(){
+    long long totalAmount = 0;
+    for (const auto& item : cartItemVector) {
+        totalAmount += item.totalPrice;
+    }
+    return totalAmount;
+}
+
+//CASH: the purchase is paid from the balance.
+//Returns true and deducts the amount only when the balance is enough.
+//If the balance is not enough, nothing is changed and errorMessage explains why.
+bool PayWithCash(userInformation& user, long long totalAmount, std::string& errorMessage){
+    if (user.curUserBalance < totalAmount) {
+        errorMessage = "Insufficient balance. The total is P" + FormatCartPrice(totalAmount) +
+                       " but your balance is only P" + FormatCartPrice(user.curUserBalance) +
+                       ".\r\nPlease deposit more funds or pay with credit.";
+        return false;
+    }
+    user.curUserBalance -= totalAmount;
+    return true;
+}
+
+//CREDIT: the purchase is added to the outstanding debt (the balance is NOT touched).
+//Returns true only when the total fits inside the remaining credit.
+//If it does not fit, nothing is changed and errorMessage explains why.
+bool PayWithCredit(userInformation& user, long long totalAmount, std::string& errorMessage){
+    const long long remainingCredit = GetRemainingCredit(user);
+    if (totalAmount > remainingCredit) {
+        errorMessage = "Credit limit exceeded. The total is P" + FormatCartPrice(totalAmount) +
+                       " but your remaining credit is only P" + FormatCartPrice(remainingCredit) +
+                       ".\r\nPlease pay part of your debt or choose a cheaper order.";
+        return false;
+    }
+    user.curUserOutstandingDebt += totalAmount;
+    return true;
+}
+
+//DEBT PAYMENT: lowers the outstanding debt (this also gives back the same amount of remaining credit).
+//The customer can pay part of the debt or all of it, but never more than the debt.
+bool PayDebt(userInformation& user, long long paymentAmount, std::string& errorMessage){
+    if (paymentAmount <= 0) {
+        errorMessage = "The payment must be greater than zero.";
+        return false;
+    }
+    if (user.curUserOutstandingDebt <= 0) {
+        errorMessage = "You have no outstanding debt to pay.";
+        return false;
+    }
+    if (paymentAmount > user.curUserOutstandingDebt) {
+        errorMessage = "You cannot pay more than your outstanding debt of P" +
+                       FormatCartPrice(user.curUserOutstandingDebt) + ".";
+        return false;
+    }
+    user.curUserOutstandingDebt -= paymentAmount;
+    return true;
+}
+
+//Deletes a receipt file (used to undo a payment when saving the account fails)
+static void DeleteReceiptTextFile(const std::string& receiptId){
+    std::error_code removeError;
+    std::filesystem::remove(std::filesystem::path("Receipts") / currentUser / (receiptId + ".txt"), removeError);
+}
+
+//Adds one line to the current user's transaction history file
+static void AppendTransactionHistory(const std::string& historyLine){
+    std::ofstream historyFile("User Transaction History/" + currentUser + ".txt", std::ios::app);
+    if (historyFile) {
+        historyFile << historyLine << '\n';
+    }
+}
+
+//Completes a checkout for the current user.
+//paymentMethod is "Cash" or "Credit". On success the receipt text is returned in receiptText.
+//On failure nothing is charged, the cart is kept and errorMessage explains why.
+bool ProcessCheckout(const std::string& paymentMethod, std::string& receiptText, std::string& errorMessage){
+    if (cartItemVector.empty()) {
+        errorMessage = "Your cart is empty.";
+        return false;
+    }
+
+    auto userDetails = userInformationMap.find(currentUser);
+    if (userDetails == userInformationMap.end()) {
+        errorMessage = "Could not find this account.";
+        return false;
+    }
+    userInformation& user = userDetails->second;
+
+    const long long totalAmount = GetCartTotal();
+    const userInformation backupUser = user;    //Copy of the account, used to undo the payment if saving fails
+
+    //Step 1: charge the customer (cash is deducted, credit becomes debt)
+    bool paymentApproved = false;
+    if (paymentMethod == "Credit") {
+        paymentApproved = PayWithCredit(user, totalAmount, errorMessage);
+    } else {
+        paymentApproved = PayWithCash(user, totalAmount, errorMessage);
+    }
+    if (!paymentApproved) {
+        return false;   //Rejected: nothing was deducted and no debt was added
+    }
+
+    //Step 2: count the purchase
+    long long purchaseCount = 0;
+    try {
+        purchaseCount = std::stoll(user.curUserPurchases);
+    } catch (...) {
+        purchaseCount = 0;
+    }
+    user.curUserPurchases = std::to_string(purchaseCount + 1);
+
+    //Step 3: write the receipt text
+    const std::string timestamp = CreateTimeStamp();
+    const std::string orderId = "ORD-" + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+    receiptText = "FLOWER SHOP ORDER RECEIPT\r\n\r\n";
+    receiptText += "Receipt ID: " + orderId + "\r\n";
+    receiptText += "Customer: " + currentUser + "\r\n";
+    receiptText += "Date: " + timestamp + "\r\n";
+    receiptText += "Payment Method: " + paymentMethod + "\r\n";
+    receiptText += "Payment Status: " + std::string(paymentMethod == "Credit" ? "Charged to Credit (Added to Outstanding Debt)" : "Paid Immediately") + "\r\n\r\n";
+    receiptText += "Items:\r\n";
+    for (const auto& item : cartItemVector) {
+        receiptText += "- " + item.orderProductName + " x" + std::to_string(item.quantity) + " @ P" + FormatCartPrice(item.orderProductPrice) + " = P" + FormatCartPrice(item.totalPrice) + "\r\n";
+    }
+    receiptText += "\r\nTotal: P" + FormatCartPrice(totalAmount) + "\r\n";
+    if (paymentMethod == "Credit") {
+        receiptText += "Outstanding Debt: P" + FormatCartPrice(user.curUserOutstandingDebt) + "\r\n";
+        receiptText += "Remaining Credit: P" + FormatCartPrice(GetRemainingCredit(user)) + "\r\n";
+    } else {
+        receiptText += "Updated Balance: P" + FormatCartPrice(user.curUserBalance) + "\r\n";
+    }
+    receiptText += "Status: Successful\r\n";
+
+    //Step 4: save the receipt and the updated account (undo everything if saving fails)
+    if (!SaveReceiptTextFile(orderId, receiptText)) {
+        user = backupUser;
+        errorMessage = "Could not save the receipt.";
+        return false;
+    }
+    if (!SaveCurrentUserDetails()) {
+        user = backupUser;
+        DeleteReceiptTextFile(orderId);
+        errorMessage = "Could not save the updated account.";
+        return false;
+    }
+
+    //Step 5: record the order in the history and empty the cart
+    AppendTransactionHistory(timestamp + " - Order " + orderId + " - " + paymentMethod + " - P" + FormatCartPrice(totalAmount));
+    cartItemVector.clear();
+    return true;
+}
+
+//Lets the current user pay part (or all) of their outstanding debt.
+//On success the receipt text is returned in receiptText.
+//On failure nothing is changed and errorMessage explains why.
+bool ProcessDebtPayment(long long paymentAmount, std::string& receiptText, std::string& errorMessage){
+    auto userDetails = userInformationMap.find(currentUser);
+    if (userDetails == userInformationMap.end()) {
+        errorMessage = "Could not find this account.";
+        return false;
+    }
+    userInformation& user = userDetails->second;
+
+    const std::string receiptId = CreateReceiptId("PAY-");
+    if (receiptId.empty()) {
+        errorMessage = "Could not create the receipt folder.";
+        return false;
+    }
+
+    const userInformation backupUser = user;    //Copy of the account, used to undo the payment if saving fails
+
+    //Step 1: lower the debt (rejected when the amount is 0, or more than the debt)
+    if (!PayDebt(user, paymentAmount, errorMessage)) {
+        return false;
+    }
+
+    //Step 2: write the receipt text
+    const std::string timestamp = CreateTimeStamp();
+    receiptText = "FLOWER SHOP DEBT PAYMENT RECEIPT\r\n\r\n";
+    receiptText += "Receipt ID: " + receiptId + "\r\n";
+    receiptText += "Date: " + timestamp + "\r\n";
+    receiptText += "Customer: " + currentUser + "\r\n";
+    receiptText += "Transaction: Debt Payment\r\n";
+    receiptText += "Amount Paid: P" + FormatCartPrice(paymentAmount) + "\r\n";
+    receiptText += "Outstanding Debt: P" + FormatCartPrice(user.curUserOutstandingDebt) + "\r\n";
+    receiptText += "Remaining Credit: P" + FormatCartPrice(GetRemainingCredit(user)) + "\r\n";
+    receiptText += "Status: Successful\r\n";
+
+    //Step 3: save the receipt and the updated account (undo everything if saving fails)
+    if (!SaveReceiptTextFile(receiptId, receiptText)) {
+        user = backupUser;
+        errorMessage = "Could not save the debt payment receipt.";
+        return false;
+    }
+    if (!SaveCurrentUserDetails()) {
+        user = backupUser;
+        DeleteReceiptTextFile(receiptId);
+        errorMessage = "Could not save the updated account.";
+        return false;
+    }
+
+    //Step 4: record the payment in the history
+    AppendTransactionHistory(timestamp + " - Debt Payment " + receiptId + ": P" + FormatCartPrice(paymentAmount));
+    return true;
+}
+//==================== END OF PAYMENT LOGIC ====================
 
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR LpCmdLine, int nCmdShow){
@@ -349,6 +586,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR LpCmdLine
     dwc.lpszClassName = TEXT("DepositPage");
     dwc.hbrBackground = gBackgroundBrush;
     RegisterClass(&dwc);
+
+    WNDCLASS pdbwc = {};
+    pdbwc.lpfnWndProc = PayDebtWindowProc;
+    pdbwc.hInstance = hInstance;
+    pdbwc.lpszClassName = TEXT("PayDebtPage");
+    pdbwc.hbrBackground = gBackgroundBrush;
+    RegisterClass(&pdbwc);
 
     WNDCLASS cowc = {};
     cowc.lpfnWndProc = CheckOutWindowProc;
@@ -907,10 +1151,11 @@ LRESULT CALLBACK CartWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
-static std::string CreateDepositReceiptId(){
+//Creates a unique receipt id such as "DEP-1795004233860" (prefix: "DEP-" = deposit, "PAY-" = debt payment)
+static std::string CreateReceiptId(const std::string& receiptPrefix){
     const auto now = std::chrono::system_clock::now().time_since_epoch();
     const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
-    const std::string baseId = "DEP-" + std::to_string(milliseconds);
+    const std::string baseId = receiptPrefix + std::to_string(milliseconds);
     const std::filesystem::path receiptFolder = std::filesystem::path("Receipts") / currentUser;
     std::error_code error;
     std::filesystem::create_directories(receiptFolder, error);
@@ -978,7 +1223,7 @@ LRESULT CALLBACK DepositWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
                 }
 
                 const long long newBalance = userDetails->second.curUserBalance + amount;
-                const std::string receiptId = CreateDepositReceiptId();
+                const std::string receiptId = CreateReceiptId("DEP-");
                 if (receiptId.empty()) {
                     MessageBox(hwnd, TEXT("Could not create the receipt folder."), TEXT("Deposit"), MB_OK | MB_ICONERROR);
                     return 0;
@@ -1056,6 +1301,85 @@ LRESULT CALLBACK DepositWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
+LRESULT CALLBACK PayDebtWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
+    switch(uMsg){
+        case WM_COMMAND:
+            if (LOWORD(wParam) == ID_PAY_DEBT_BACK_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                HWND moreWindow = reinterpret_cast<HWND>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+                DestroyWindowForNavigation(hwnd);
+                if (moreWindow) {
+                    ShowWindow(moreWindow, SW_SHOW);
+                }
+                return 0;
+            }
+            if (LOWORD(wParam) == ID_PAY_DEBT_SUBMIT_BUTTON && HIWORD(wParam) == BN_CLICKED) {
+                //Read the amount and make sure it is a whole number
+                char amountText[32] = {};
+                GetDlgItemTextA(hwnd, ID_PAY_DEBT_AMOUNT_EDIT, amountText, sizeof(amountText));
+                const std::string amountString(amountText);
+                if (amountString.empty() || !std::all_of(amountString.begin(), amountString.end(), [](unsigned char ch) {
+                    return std::isdigit(ch);
+                })) {
+                    MessageBox(hwnd, TEXT("Enter a whole-number payment amount."), TEXT("Pay Debt"), MB_OK | MB_ICONWARNING);
+                    return 0;
+                }
+
+                long long paymentAmount = 0;
+                try {
+                    paymentAmount = std::stoll(amountString);
+                } catch (...) {
+                    MessageBox(hwnd, TEXT("The payment amount is too large."), TEXT("Pay Debt"), MB_OK | MB_ICONWARNING);
+                    return 0;
+                }
+
+                //Let the payment logic decide (it rejects 0 and anything above the debt)
+                std::string receiptText;
+                std::string errorMessage;
+                if (!ProcessDebtPayment(paymentAmount, receiptText, errorMessage)) {
+                    MessageBoxA(hwnd, errorMessage.c_str(), "Pay Debt", MB_OK | MB_ICONWARNING);
+                    return 0;
+                }
+
+                //Show the new credit numbers, then the receipt (Continue returns to this window)
+                UpdateCreditInfoLabels(hwnd);
+                SetDlgItemTextA(hwnd, ID_PAY_DEBT_AMOUNT_EDIT, "");
+                HWND receiptWindow = CreateReceiptWindow(GetModuleHandle(nullptr), receiptText, hwnd);
+                if (receiptWindow) {
+                    ShowWindow(hwnd, SW_HIDE);
+                    ShowWindow(receiptWindow, SW_SHOW);
+                } else {
+                    MessageBox(hwnd, TEXT("Debt payment saved, but the receipt window could not be opened."), TEXT("Pay Debt"), MB_OK | MB_ICONWARNING);
+                }
+                return 0;
+            }
+            return 0;
+
+        case WM_ERASEBKGND: {
+            HDC hdc = (HDC)wParam;
+            RECT rect;
+            GetClientRect(hwnd, &rect);
+            FillRect(hdc, &rect, gBackgroundBrush);
+            return TRUE;
+        }
+
+        case WM_CTLCOLORSTATIC: {
+            HDC hdc = (HDC)wParam;
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, RGB(80, 30, 50));
+            return (LRESULT)gBackgroundBrush;
+        }
+
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+
+        case WM_DESTROY:
+            if (!gNavigationDestroy) PostQuitMessage(0);
+            return 0;
+    }
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
 LRESULT CALLBACK MoreWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
     switch(uMsg){
         case WM_COMMAND:
@@ -1076,6 +1400,14 @@ LRESULT CALLBACK MoreWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 HWND historyWindow = CreateTransactionHistoryWindow(GetModuleHandle(nullptr), hwnd);
                 CreateTransactionHistoryForm(historyWindow, GetModuleHandle(nullptr));
                 ShowWindow(historyWindow, SW_SHOW);
+            }
+            else if(LOWORD(wParam) == ID_MORE_PAY_DEBT_BUTTON && HIWORD(wParam) == BN_CLICKED){
+                HWND payDebtWindow = CreatePayDebtWindow(GetModuleHandle(nullptr), hwnd);
+                if (payDebtWindow) {
+                    CreatePayDebtForm(payDebtWindow, GetModuleHandle(nullptr));
+                    ShowWindow(hwnd, SW_HIDE);
+                    ShowWindow(payDebtWindow, SW_SHOW);
+                }
             }
             else if(LOWORD(wParam) == ID_MORE_BACK_BUTTON && HIWORD(wParam) == BN_CLICKED){
                 DestroyWindowForNavigation(hwnd);
@@ -1370,76 +1702,21 @@ LRESULT CALLBACK CheckOutWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM 
                 return 0;
             }
             if (LOWORD(wParam) == ID_CHECKOUT_CONFIRM_BUTTON && HIWORD(wParam) == BN_CLICKED) {
-                if (cartItemVector.empty()) {
-                    MessageBox(hwnd, TEXT("Your cart is empty."), TEXT("Checkout"), MB_OK | MB_ICONWARNING);
-                    return 0;
-                }
-
-                long long totalAmount = 0;
-                for (const auto& item : cartItemVector) {
-                    totalAmount += item.totalPrice;
-                }
-
+                //Read the chosen payment method (index 0 = Cash, index 1 = Credit)
                 HWND paymentCombo = GetDlgItem(hwnd, ID_CHECKOUT_PAYMENT_COMBO);
                 int paymentIndex = paymentCombo ? static_cast<int>(SendMessage(paymentCombo, CB_GETCURSEL, 0, 0)) : 0;
                 const std::string paymentMethod = (paymentIndex == 1) ? "Credit" : "Cash";
 
-                auto userDetails = userInformationMap.find(currentUser);
-                if (userDetails == userInformationMap.end()) {
-                    MessageBox(hwnd, TEXT("Could not find this account."), TEXT("Checkout"), MB_OK | MB_ICONERROR);
+                //ProcessCheckout checks the balance / credit, charges the customer and saves everything
+                std::string receiptText;
+                std::string errorMessage;
+                if (!ProcessCheckout(paymentMethod, receiptText, errorMessage)) {
+                    MessageBoxA(hwnd, errorMessage.c_str(), "Checkout", MB_OK | MB_ICONWARNING);
                     return 0;
-                }
-
-                if (paymentMethod == "Credit" && userDetails->second.curUserBalance < totalAmount) {
-                    MessageBox(hwnd, TEXT("Insufficient system balance for credit payment."), TEXT("Checkout"), MB_OK | MB_ICONWARNING);
-                    return 0;
-                }
-
-                const std::string timestamp = CreateTimeStamp();
-                const std::string orderId = "ORD-" + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
-                std::string receiptText = "FLOWER SHOP ORDER RECEIPT\r\n\r\n";
-                receiptText += "Receipt ID: " + orderId + "\r\n";
-                receiptText += "Customer: " + currentUser + "\r\n";
-                receiptText += "Date: " + timestamp + "\r\n";
-                receiptText += "Payment Method: " + paymentMethod + "\r\n";
-                receiptText += "Payment Status: " + std::string(paymentMethod == "Cash" ? "Paid Immediately" : "Balance Deducted") + "\r\n\r\n";
-                receiptText += "Items:\r\n";
-                for (const auto& item : cartItemVector) {
-                    receiptText += "- " + item.orderProductName + " x" + std::to_string(item.quantity) + " @ P" + FormatCartPrice(item.orderProductPrice) + " = P" + FormatCartPrice(item.totalPrice) + "\r\n";
-                }
-                receiptText += "\r\nTotal: P" + FormatCartPrice(totalAmount) + "\r\n";
-                receiptText += "Status: Successful\r\n";
-
-                if (paymentMethod == "Credit") {
-                    userDetails->second.curUserBalance -= totalAmount;
-                }
-
-                long long purchaseCount = 0;
-                try {
-                    purchaseCount = std::stoll(userDetails->second.curUserPurchases);
-                } catch (...) {
-                    purchaseCount = 0;
-                }
-                userDetails->second.curUserPurchases = std::to_string(purchaseCount + 1);
-
-                if (!SaveReceiptTextFile(orderId, receiptText)) {
-                    MessageBox(hwnd, TEXT("Could not save the receipt."), TEXT("Checkout"), MB_OK | MB_ICONERROR);
-                    return 0;
-                }
-
-                if (!SaveCurrentUserDetails()) {
-                    MessageBox(hwnd, TEXT("Could not save the updated account."), TEXT("Checkout"), MB_OK | MB_ICONERROR);
-                    return 0;
-                }
-
-                std::ofstream historyFile("User Transaction History/" + currentUser + ".txt", std::ios::app);
-                if (historyFile) {
-                    historyFile << timestamp << " - Order " << orderId << " - " << paymentMethod << " - P" << FormatCartPrice(totalAmount) << '\n';
                 }
 
                 HWND receiptWindow = CreateReceiptWindow(GetModuleHandle(nullptr), receiptText, nullptr);
                 DestroyWindowForNavigation(hwnd);
-                cartItemVector.clear();
                 if (receiptWindow) {
                     ShowWindow(receiptWindow, SW_SHOW);
                 }
@@ -1737,10 +2014,7 @@ void CreateCheckOutForm(HWND parent, HINSTANCE hInstance){
         nullptr
     );
 
-    long long totalAmount = 0;
-    for (const auto& item : cartItemVector) {
-        totalAmount += item.totalPrice;
-    }
+    const long long totalAmount = GetCartTotal();
 
     std::string totalText = "Total: P" + FormatCartPrice(totalAmount);
     CreateWindowExA(
@@ -1796,6 +2070,21 @@ void CreateCheckOutForm(HWND parent, HINSTANCE hInstance){
         hInstance,
         nullptr
     );
+
+    //Show the customer's balance and credit information so they can choose a payment method
+    const std::string balanceText = "Your Balance: P" + FormatCartPrice(userInformationMap[currentUser].curUserBalance);
+    CreateWindowExA(
+        0,
+        "STATIC",
+        balanceText.c_str(),
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        80, 240, 300, 25,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+    CreateCreditInfoLabels(parent, hInstance, 80, 270);
 
     CreateWindowEx(
         0,
@@ -1981,6 +2270,110 @@ void CreateDepositForm(HWND parent, HINSTANCE hInstance){
         hInstance,
         nullptr
     );
+}
+
+HWND CreatePayDebtWindow(HINSTANCE hInstance, HWND moreWindow){
+    HWND payDebtWindow = CreateWindowEx(
+        WS_EX_DLGMODALFRAME,
+        TEXT("PayDebtPage"),
+        TEXT("Pay Debt"),
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+        gLoginRegisterWindowX + 190,
+        gLoginRegisterWindowY + 120,
+        420,
+        340,
+        nullptr,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+    if (payDebtWindow) {
+        SetWindowLongPtr(payDebtWindow, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(moreWindow));
+    }
+    return payDebtWindow;
+}
+
+void CreatePayDebtForm(HWND parent, HINSTANCE hInstance){
+    CreateCreditInfoLabels(parent, hInstance, 55, 20);
+    CreateWindowEx(
+        0,
+        TEXT("STATIC"),
+        TEXT("Payment (P):"),
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        55, 135, 100, 28,
+        parent,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+    CreateWindowEx(
+        0,
+        TEXT("EDIT"),
+        TEXT(""),
+        WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL,
+        160, 130, 190, 30,
+        parent,
+        (HMENU)ID_PAY_DEBT_AMOUNT_EDIT,
+        hInstance,
+        nullptr
+    );
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Pay Debt"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        145, 195, 100, 35,
+        parent,
+        (HMENU)ID_PAY_DEBT_SUBMIT_BUTTON,
+        hInstance,
+        nullptr
+    );
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Back"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        255, 195, 90, 35,
+        parent,
+        (HMENU)ID_PAY_DEBT_BACK_BUTTON,
+        hInstance,
+        nullptr
+    );
+}
+
+//Creates three lines of text: credit limit, outstanding debt and remaining credit of the current user
+void CreateCreditInfoLabels(HWND parent, HINSTANCE hInstance, int x, int y){
+    const int labelIds[3] = {ID_CREDIT_LIMIT_TEXT, ID_OUTSTANDING_DEBT_TEXT, ID_REMAINING_CREDIT_TEXT};
+    for (int i = 0; i < 3; ++i) {
+        CreateWindowExA(
+            0,
+            "STATIC",
+            "",
+            WS_CHILD | WS_VISIBLE | SS_LEFT,
+            x, y + (i * 30), 300, 25,
+            parent,
+            (HMENU)(INT_PTR)labelIds[i],
+            hInstance,
+            nullptr
+        );
+    }
+    UpdateCreditInfoLabels(parent);
+}
+
+//Refreshes the three credit lines with the current user's latest numbers
+void UpdateCreditInfoLabels(HWND parent){
+    auto userDetails = userInformationMap.find(currentUser);
+    if (userDetails == userInformationMap.end()) {
+        return;
+    }
+    const userInformation& user = userDetails->second;
+
+    const std::string limitText = "Credit Limit: P" + FormatCartPrice(user.curUserCreditLimit);
+    const std::string debtText = "Outstanding Debt: P" + FormatCartPrice(user.curUserOutstandingDebt);
+    const std::string remainingText = "Remaining Credit: P" + FormatCartPrice(GetRemainingCredit(user));
+    SetDlgItemTextA(parent, ID_CREDIT_LIMIT_TEXT, limitText.c_str());
+    SetDlgItemTextA(parent, ID_OUTSTANDING_DEBT_TEXT, debtText.c_str());
+    SetDlgItemTextA(parent, ID_REMAINING_CREDIT_TEXT, remainingText.c_str());
 }
 
 void CreateProductDetailsForm(HWND parent, HINSTANCE hInstance, int productIndex){
@@ -2712,6 +3105,19 @@ void CreateMoreTransactionHistoryButton(HWND parent, HINSTANCE hInstance){
     );
 }
 
+void CreateMorePayDebtButton(HWND parent, HINSTANCE hInstance){
+    CreateWindowEx(
+        0,
+        TEXT("BUTTON"),
+        TEXT("Pay Debt"),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        270, 250, 220, 40,
+        parent,
+        (HMENU)ID_MORE_PAY_DEBT_BUTTON,
+        hInstance,
+        nullptr
+    );
+}
 void CreateMoreBackButton(HWND parent, HINSTANCE hInstance){
     CreateWindowEx(
         0, 
@@ -2730,6 +3136,7 @@ void CreateMoreForm(HWND parent, HINSTANCE hInstance){
     CreateMoreAboutUsButton(parent, hInstance);
     CreateMoreProfileButton(parent, hInstance);
     CreateMoreTransactionHistoryButton(parent, hInstance);
+    CreateMorePayDebtButton(parent, hInstance);
     CreateMoreBackButton(parent, hInstance);
 }
 
@@ -2977,6 +3384,7 @@ void CreateProfileForm(HWND parent, HINSTANCE hInstance){
     CreateProfilePasswordText(parent, hInstance);
     CreateProfileBalanceText(parent, hInstance);
     CreateProfilePurchasesText(parent, hInstance);
+    CreateCreditInfoLabels(parent, hInstance, 300, 460);
     CreateProfileBackButton(parent, hInstance);
 }
 
@@ -3093,6 +3501,7 @@ void LoadCurrentUserDetails(){
     }
 
     userInformation details{};
+    details.curUserCreditLimit = DEFAULT_CREDIT_LIMIT;   //Used when an older account file has no "Credit Limit" line
     std::string line;
     while (std::getline(file, line)) {
         const size_t delimiter = line.find(':');
@@ -3119,8 +3528,24 @@ void LoadCurrentUserDetails(){
             }
         } else if (field == "Purchases" || field == "Transactions" || field == "Transations") {
             details.curUserPurchases = value;
+        } else if (field == "Credit Limit") {
+            try {
+                details.curUserCreditLimit = std::stoll(value);
+            } catch (...) {
+                details.curUserCreditLimit = DEFAULT_CREDIT_LIMIT;
+            }
+        } else if (field == "Outstanding Debt") {
+            try {
+                details.curUserOutstandingDebt = std::stoll(value);
+            } catch (...) {
+                details.curUserOutstandingDebt = 0;
+            }
         }
     }
+
+    //A credit limit or debt below zero makes no sense, so treat it as zero
+    if (details.curUserCreditLimit < 0) details.curUserCreditLimit = 0;
+    if (details.curUserOutstandingDebt < 0) details.curUserOutstandingDebt = 0;
 
     userInformationMap[currentUser] = details;
 }
@@ -3139,7 +3564,9 @@ bool SaveCurrentUserDetails(){
     file << "Username: " << currentUser << '\n'
          << "Password: " << details->second.curUserPassword << '\n'
          << "Balance: " << details->second.curUserBalance << '\n'
-         << "Purchases: " << details->second.curUserPurchases << '\n';
+         << "Purchases: " << details->second.curUserPurchases << '\n'
+         << "Credit Limit: " << details->second.curUserCreditLimit << '\n'
+         << "Outstanding Debt: " << details->second.curUserOutstandingDebt << '\n';
     return static_cast<bool>(file);
 }
 
@@ -3205,7 +3632,9 @@ void CreateUserInformationTextFile(){
     file << "Username: " << currentUser << '\n'
          << "Password: " << user->second << '\n'
          << "Balance: 0\n"
-            << "Purchases: 0\n";
+         << "Purchases: 0\n"
+         << "Credit Limit: " << DEFAULT_CREDIT_LIMIT << '\n'
+         << "Outstanding Debt: 0\n";
 }
 
 void CreateUserLogsTextFile(){

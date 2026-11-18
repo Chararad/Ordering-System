@@ -2,3 +2,5 @@ Username: fixthing
 Password: debugging
 Balance: 0
 Purchases: 0
+Credit Limit: 10000
+Outstanding Debt: 0
