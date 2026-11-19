@@ -1,0 +1,15 @@
+FLOWER SHOP ORDER RECEIPT
+
+Receipt ID: ORD-1795070674945
+Customer: ches
+Date: Thu Nov 19 14:44:34 2026
+Payment Method: Credit
+Payment Status: Charged to Credit (Added to Outstanding Debt)
+
+Items:
+- Blue Lagoon x1 @ P2,100 = P2,100
+
+Total: P2,100
+Outstanding Debt: P2,100
+Remaining Credit: P7,900
+Status: Successful

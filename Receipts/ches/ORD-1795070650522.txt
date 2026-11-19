@@ -1,0 +1,14 @@
+FLOWER SHOP ORDER RECEIPT
+
+Receipt ID: ORD-1795070650522
+Customer: ches
+Date: Thu Nov 19 14:44:10 2026
+Payment Method: Cash
+Payment Status: Paid Immediately
+
+Items:
+- Crimson Devotion x1 @ P2,800 = P2,800
+
+Total: P2,800
+Updated Balance: P8,200
+Status: Successful

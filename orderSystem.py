@@ -6,10 +6,10 @@ Uses the same data layout as the C++ version, so existing data keeps working:
     products.txt                           Product Name|001
     Product Informations/001.png           product image (default.png = fallback)
     Product Informations/Product Details/001.txt   Price / Flower Type / Description
-    User Informations/<user>.txt           account details
+    User Informations/<user>.txt           account details (balance, credit limit, debt)
     User Logs/<user>.txt                   login log
     User Transaction History/<user>.txt    order/deposit history
-    Receipts/<user>/<receipt id>.txt       saved receipts
+    Receipts/<user>/<receipt id>.txt       saved receipts (ORD- order, DEP- deposit, PAY- debt payment)
     AboutUs.txt, user.png                  About Us text, profile picture
 
 Optional: `pip install pillow` for better image scaling and the pink default tiles.
@@ -44,6 +44,10 @@ PRODUCT_DIR = Path("Product Informations")
 DETAILS_DIR = PRODUCT_DIR / "Product Details"
 
 MAX_DEPOSIT = 1_000_000
+
+# Credit limit given to every new account. It is saved separately in each customer's
+# account file ("Credit Limit:" line), so it can be changed for each customer.
+DEFAULT_CREDIT_LIMIT = 10_000
 USERNAME_RE = re.compile(r"[A-Za-z0-9_.\- ]+")
 
 
@@ -110,6 +114,59 @@ def default_tile(name, w, h):
 
 
 # --------------------------------------------------------------------------
+# Payment logic (only works on an account dictionary: no UI, no files)
+# Each function returns None when the payment is approved, or an error message
+# when it is rejected. A rejected payment never changes the account.
+# --------------------------------------------------------------------------
+
+def remaining_credit(account):
+    """Remaining credit = credit limit - outstanding debt (never below 0)."""
+    return max(0, account["credit_limit"] - account["debt"])
+
+
+def pay_with_cash(account, total):
+    """CASH: the purchase is paid from the balance. Deducts it only if the balance is enough."""
+    if account["balance"] < total:
+        return (f"Insufficient balance. The total is {money(total)} but your balance is "
+                f"only {money(account['balance'])}.\n"
+                "Please deposit more funds or pay with credit.")
+    account["balance"] -= total
+    return None
+
+
+def pay_with_credit(account, total):
+    """CREDIT: the purchase becomes outstanding debt (the balance is NOT touched).
+    Approved only if the total fits inside the remaining credit."""
+    available = remaining_credit(account)
+    if total > available:
+        return (f"Credit limit exceeded. The total is {money(total)} but your remaining "
+                f"credit is only {money(available)}.\n"
+                "Please pay part of your debt or choose a cheaper order.")
+    account["debt"] += total
+    return None
+
+
+def pay_debt(account, amount):
+    """DEBT PAYMENT: the payment is taken from the balance and lowers the outstanding debt
+    (this also gives back the same amount of remaining credit).
+    The customer can pay part of the debt or all of it, but never more than the debt,
+    and never more than the balance they have."""
+    if amount <= 0:
+        return "The payment must be greater than zero."
+    if account["debt"] <= 0:
+        return "You have no outstanding debt to pay."
+    if amount > account["debt"]:
+        return f"You cannot pay more than your outstanding debt of {money(account['debt'])}."
+    if account["balance"] < amount:
+        return (f"Insufficient balance. You are paying {money(amount)} but your balance is "
+                f"only {money(account['balance'])}.\n"
+                "Please deposit more funds first.")
+    account["balance"] -= amount   # money leaves the balance...
+    account["debt"] -= amount      # ...and the debt becomes smaller
+    return None
+
+
+# --------------------------------------------------------------------------
 # Data layer (no UI code in here)
 # --------------------------------------------------------------------------
 
@@ -120,7 +177,7 @@ class Store:
         Path(USERS_FILE).touch(exist_ok=True)
 
         self.users = {}       # username -> password
-        self.accounts = {}    # username -> {"password", "balance", "purchases"}
+        self.accounts = {}    # username -> {"password", "balance", "purchases", "credit_limit", "debt"}
         self.products = []    # [(name, id)]
         self.details = {}     # id -> {"name", "price", "flower_type", "description"}
         self.cart = []        # [{"id", "name", "price", "qty"}]
@@ -176,7 +233,9 @@ class Store:
         return self.accounts[self.current]
 
     def load_account(self):
-        acct = {"password": self.users.get(self.current, ""), "balance": 0, "purchases": "0"}
+        # credit_limit stays at the default when an older account file has no "Credit Limit" line
+        acct = {"password": self.users.get(self.current, ""), "balance": 0, "purchases": "0",
+                "credit_limit": DEFAULT_CREDIT_LIMIT, "debt": 0}
         for line in read_lines(INFO_DIR / f"{self.current}.txt"):
             if ":" not in line:
                 continue
@@ -191,6 +250,19 @@ class Store:
                     acct["balance"] = 0
             elif field in ("Purchases", "Transactions", "Transations"):
                 acct["purchases"] = value
+            elif field == "Credit Limit":
+                try:
+                    acct["credit_limit"] = int(value)
+                except ValueError:
+                    acct["credit_limit"] = DEFAULT_CREDIT_LIMIT
+            elif field == "Outstanding Debt":
+                try:
+                    acct["debt"] = int(value)
+                except ValueError:
+                    acct["debt"] = 0
+        # A credit limit or debt below zero makes no sense, so treat it as zero
+        acct["credit_limit"] = max(0, acct["credit_limit"])
+        acct["debt"] = max(0, acct["debt"])
         self.accounts[self.current] = acct
 
     def save_account(self):
@@ -202,7 +274,9 @@ class Store:
                 f.write(f"Username: {self.current}\n"
                         f"Password: {acct['password']}\n"
                         f"Balance: {acct['balance']}\n"
-                        f"Purchases: {acct['purchases']}\n")
+                        f"Purchases: {acct['purchases']}\n"
+                        f"Credit Limit: {acct['credit_limit']}\n"
+                        f"Outstanding Debt: {acct['debt']}\n")
             return True
         except OSError:
             return False
@@ -234,7 +308,8 @@ class Store:
             return "Error saving user data."
         self.users[username] = password
         self.current = username
-        self.accounts[username] = {"password": password, "balance": 0, "purchases": "0"}
+        self.accounts[username] = {"password": password, "balance": 0, "purchases": "0",
+                                   "credit_limit": DEFAULT_CREDIT_LIMIT, "debt": 0}
         self.save_account()
         (LOGS_DIR / f"{username}.txt").write_text("", encoding="utf-8")
         self.log("Account Created")
@@ -346,17 +421,35 @@ class Store:
         return True, receipt
 
     def checkout(self, method):
-        """method is 'Cash' or 'Credit'. Returns (ok, error message or receipt text)."""
+        """Pays for the cart. method is 'Cash' or 'Credit'. Returns (ok, error message or receipt text).
+        On failure nothing is charged and the cart is kept."""
         if not self.cart:
             return False, "Your cart is empty."
         total = self.cart_total()
         acct = self.account
-        if method == "Credit" and acct["balance"] < total:
-            return False, "Insufficient system balance for credit payment."
+        previous = dict(acct)   # copy of the account, used to undo the payment if saving fails
 
+        # Step 1: charge the customer (cash is deducted, credit becomes debt)
+        if method == "Credit":
+            error = pay_with_credit(acct, total)
+        else:
+            error = pay_with_cash(acct, total)
+        if error:
+            return False, error   # rejected: nothing was deducted and no debt was added
+
+        # Step 2: count the purchase
+        try:
+            acct["purchases"] = str(int(acct["purchases"]) + 1)
+        except ValueError:
+            acct["purchases"] = "1"
+
+        # Step 3: write the receipt text
         ts = timestamp()
         oid = self.new_receipt_id("ORD")
-        status = "Paid Immediately" if method == "Cash" else "Balance Deducted"
+        if method == "Credit":
+            status = "Charged to Credit (Added to Outstanding Debt)"
+        else:
+            status = "Paid Immediately"
         lines = ["FLOWER SHOP ORDER RECEIPT", "",
                  f"Receipt ID: {oid}",
                  f"Customer: {self.current}",
@@ -367,17 +460,16 @@ class Store:
         for it in self.cart:
             lines.append(f"- {it['name']} x{it['qty']} @ {money(it['price'])} "
                          f"= {money(it['price'] * it['qty'])}")
-        lines += ["", f"Total: {money(total)}", "Status: Successful", ""]
+        lines += ["", f"Total: {money(total)}"]
+        if method == "Credit":
+            lines += [f"Outstanding Debt: {money(acct['debt'])}",
+                      f"Remaining Credit: {money(remaining_credit(acct))}"]
+        else:
+            lines.append(f"Updated Balance: {money(acct['balance'])}")
+        lines += ["Status: Successful", ""]
         receipt = "\n".join(lines)
 
-        previous = dict(acct)
-        if method == "Credit":
-            acct["balance"] -= total
-        try:
-            acct["purchases"] = str(int(acct["purchases"]) + 1)
-        except ValueError:
-            acct["purchases"] = "1"
-
+        # Step 4: save the receipt and the updated account (undo everything if saving fails)
         if not self.save_receipt(oid, receipt):
             acct.update(previous)
             return False, "Could not save the receipt."
@@ -385,8 +477,53 @@ class Store:
             acct.update(previous)
             self.delete_receipt(oid)
             return False, "Could not save the updated account."
+
+        # Step 5: record the order in the history and empty the cart
         self.add_history(f"{ts} - Order {oid} - {method} - {money(total)}")
         self.cart.clear()
+        return True, receipt
+
+    def process_debt_payment(self, amount_text):
+        """Lets the customer pay part (or all) of their outstanding debt using their balance.
+        Returns (ok, error message or receipt text). On failure nothing is changed."""
+        text = amount_text.strip()
+        if not text or not (text.isascii() and text.isdigit()):
+            return False, "Enter a whole-number payment amount."
+        amount = int(text)
+
+        acct = self.account
+        previous = dict(acct)   # copy of the account, used to undo the payment if saving fails
+        rid = self.new_receipt_id("PAY")
+
+        # Step 1: lower the debt and the balance (rejected if 0, above the debt, or above the balance)
+        error = pay_debt(acct, amount)
+        if error:
+            return False, error
+
+        # Step 2: write the receipt text
+        ts = timestamp()
+        receipt = ("FLOWER SHOP DEBT PAYMENT RECEIPT\n\n"
+                   f"Receipt ID: {rid}\n"
+                   f"Date: {ts}\n"
+                   f"Customer: {self.current}\n"
+                   "Transaction: Debt Payment\n"
+                   f"Amount Paid: {money(amount)}\n"
+                   f"Updated Balance: {money(acct['balance'])}\n"
+                   f"Outstanding Debt: {money(acct['debt'])}\n"
+                   f"Remaining Credit: {money(remaining_credit(acct))}\n"
+                   "Status: Successful\n")
+
+        # Step 3: save the receipt and the updated account (undo everything if saving fails)
+        if not self.save_receipt(rid, receipt):
+            acct.update(previous)
+            return False, "Could not save the debt payment receipt."
+        if not self.save_account():
+            acct.update(previous)
+            self.delete_receipt(rid)
+            return False, "Could not save the updated account."
+
+        # Step 4: record the payment in the history
+        self.add_history(f"{ts} - Debt Payment {rid}: {money(amount)}")
         return True, receipt
 
 
@@ -440,6 +577,19 @@ class App(tk.Tk):
 
     def back_btn(self, parent, command):
         self.btn(parent, "Back", command).place(x=10, y=10, width=90, height=30)
+
+    def digits_only(self):
+        """Entry validation: only allows whole numbers to be typed."""
+        return (self.register(lambda v: v == "" or (v.isascii() and v.isdigit())), "%P")
+
+    def credit_info(self, parent, x, y, gap=30):
+        """Shows three lines: credit limit, outstanding debt and remaining credit."""
+        acct = self.store.account
+        lines = (f"Credit Limit: {money(acct['credit_limit'])}",
+                 f"Outstanding Debt: {money(acct['debt'])}",
+                 f"Remaining Credit: {money(remaining_credit(acct))}")
+        for i, text in enumerate(lines):
+            self.place_c(self.lbl(parent, text), x, y + i * gap, 300, 25)
 
     @staticmethod
     def place_c(widget, x, y, w, h):
@@ -592,8 +742,7 @@ class App(tk.Tk):
         dlg.grab_set()
 
         self.lbl(dlg, "Amount (P):").place(x=55, y=75, width=90, height=28)
-        digits_only = (self.register(lambda v: v == "" or (v.isascii() and v.isdigit())), "%P")
-        amount = tk.Entry(dlg, validate="key", validatecommand=digits_only)
+        amount = tk.Entry(dlg, validate="key", validatecommand=self.digits_only())
         amount.place(x=150, y=70, width=200, height=30)
         amount.focus_set()
 
@@ -637,8 +786,7 @@ class App(tk.Tk):
         self.place_c(self.lbl(f, text, 11, anchor="nw", wraplength=340), 390, 165, 340, 250)
 
         self.place_c(self.lbl(f, "Quantity:"), 390, 430, 70, 25)
-        digits_only = (self.register(lambda v: v == "" or (v.isascii() and v.isdigit())), "%P")
-        qty = tk.Entry(f, validate="key", validatecommand=digits_only)
+        qty = tk.Entry(f, validate="key", validatecommand=self.digits_only())
         qty.insert(0, "1")
         self.place_c(qty, 465, 425, 80, 28)
 
@@ -719,6 +867,9 @@ class App(tk.Tk):
         combo.current(0)
         self.place_c(combo, 240, 148, 180, 28)
         self.place_c(self.lbl(f, f"Items in cart: {len(s.cart)}", 12), 80, 200, 300, 30)
+        # Show the balance and credit information so the customer can choose a payment method
+        self.place_c(self.lbl(f, f"Your Balance: {money(s.account['balance'])}"), 80, 240, 300, 25)
+        self.credit_info(f, 80, 270)
 
         def confirm():
             ok, result = s.checkout(combo.get())
@@ -755,6 +906,31 @@ class App(tk.Tk):
         self.place_c(self.btn(f, "About Us", self.show_about), 330, 100, 140, 30)
         self.place_c(self.btn(f, "Profile", self.show_profile), 330, 150, 140, 30)
         self.place_c(self.btn(f, "Transaction History", self.show_history), 290, 200, 220, 40)
+        self.place_c(self.btn(f, "Pay Debt", self.show_pay_debt), 290, 250, 220, 40)
+
+    def show_pay_debt(self):
+        s = self.store
+        f = self.screen("Pay Debt")
+        self.back_btn(f, self.show_more)
+        self.place_c(self.lbl(f, "PAY DEBT", 16, True, "center"), 220, 20, 360, 35)
+        self.credit_info(f, 250, 90)
+        self.place_c(self.lbl(f, f"Your Balance: {money(s.account['balance'])}"), 250, 190, 300, 25)
+
+        self.place_c(self.lbl(f, "Payment (P):"), 250, 245, 100, 28)
+        amount = tk.Entry(f, validate="key", validatecommand=self.digits_only())
+        self.place_c(amount, 360, 240, 190, 30)
+        amount.focus_set()
+
+        def submit():
+            # process_debt_payment rejects 0, more than the debt, and more than the balance
+            ok, result = s.process_debt_payment(amount.get())
+            if not ok:
+                messagebox.showwarning("Pay Debt", result)
+                return
+            self.show_receipt(result, self.show_pay_debt)   # Continue comes back with the new numbers
+
+        self.place_c(self.btn(f, "Pay Debt", submit), 340, 300, 120, 40)
+        amount.bind("<Return>", lambda e: submit())
 
     def show_about(self):
         f = self.screen("AboutUs")
@@ -780,6 +956,7 @@ class App(tk.Tk):
         self.place_c(self.lbl(f, f"Password: {acct['password']}"), 300, 340, 300, 30)
         self.place_c(self.lbl(f, f"Balance: {money(acct['balance'])}"), 300, 380, 300, 30)
         self.place_c(self.lbl(f, f"Purchases: {acct['purchases']}"), 300, 420, 400, 30)
+        self.credit_info(f, 300, 452, gap=25)   # tighter, so it fits in the smallest window
 
     def show_history(self):
         f = self.screen("Transaction History")

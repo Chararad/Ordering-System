@@ -2,3 +2,5 @@ Username: chad
 Password: hhhh
 Balance: 1000
 Purchases: 1
+Credit Limit: 10000
+Outstanding Debt: 0
