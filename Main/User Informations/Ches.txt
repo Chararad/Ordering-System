@@ -1,6 +1,6 @@
 Username: Ches
 Password: 12345
-Balance: 4200
+Balance: 3200
 Purchases: 7
 Credit Limit: 10000
-Outstanding Debt: 0
+Outstanding Debt: 1100

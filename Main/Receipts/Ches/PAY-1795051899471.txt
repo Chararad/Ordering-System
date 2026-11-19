@@ -1,0 +1,11 @@
+FLOWER SHOP DEBT PAYMENT RECEIPT
+
+Receipt ID: PAY-1795051899471
+Date: Thu Nov 19 09:31:39 2026
+Customer: Ches
+Transaction: Debt Payment
+Amount Paid: P1,000
+Updated Balance: P3,200
+Outstanding Debt: P1,100
+Remaining Credit: P8,900
+Status: Successful

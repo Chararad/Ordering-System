@@ -64,6 +64,7 @@ using namespace Gdiplus;
 #define ID_CREDIT_LIMIT_TEXT 145
 #define ID_OUTSTANDING_DEBT_TEXT 146
 #define ID_REMAINING_CREDIT_TEXT 147
+#define ID_PAY_DEBT_BALANCE_TEXT 148
 #define ID_PRODUCT_BUTTON_BASE 2000
 #define WM_PRODUCT_BITMAP_READY (WM_APP + 1)
 
@@ -137,6 +138,7 @@ void CreatePayDebtForm(HWND parent, HINSTANCE hInstance);
 void CreateMorePayDebtButton(HWND parent, HINSTANCE hInstance);
 void CreateCreditInfoLabels(HWND parent, HINSTANCE hInstance, int x, int y);
 void UpdateCreditInfoLabels(HWND parent);
+void UpdatePayDebtBalanceText(HWND parent);
 void CreateMainMenuForm(HWND parent, HINSTANCE hInstance);
 void MainMenuExit(HWND hwnd);
 void CreateMoreAboutUsButton(HWND parent, HINSTANCE hInstance);
@@ -310,8 +312,10 @@ bool PayWithCredit(userInformation& user, long long totalAmount, std::string& er
     return true;
 }
 
-//DEBT PAYMENT: lowers the outstanding debt (this also gives back the same amount of remaining credit).
-//The customer can pay part of the debt or all of it, but never more than the debt.
+//DEBT PAYMENT: the payment is taken from the cash balance and lowers the outstanding debt
+//(this also gives back the same amount of remaining credit).
+//The customer can pay part of the debt or all of it, but never more than the debt,
+//and never more than the balance they have.
 bool PayDebt(userInformation& user, long long paymentAmount, std::string& errorMessage){
     if (paymentAmount <= 0) {
         errorMessage = "The payment must be greater than zero.";
@@ -326,7 +330,14 @@ bool PayDebt(userInformation& user, long long paymentAmount, std::string& errorM
                        FormatCartPrice(user.curUserOutstandingDebt) + ".";
         return false;
     }
-    user.curUserOutstandingDebt -= paymentAmount;
+    if (user.curUserBalance < paymentAmount) {
+        errorMessage = "Insufficient balance. You are paying P" + FormatCartPrice(paymentAmount) +
+                       " but your balance is only P" + FormatCartPrice(user.curUserBalance) +
+                       ".\r\nPlease deposit more funds first.";
+        return false;
+    }
+    user.curUserBalance -= paymentAmount;               //Money leaves the balance...
+    user.curUserOutstandingDebt -= paymentAmount;       //...and the debt becomes smaller
     return true;
 }
 
@@ -424,7 +435,7 @@ bool ProcessCheckout(const std::string& paymentMethod, std::string& receiptText,
     return true;
 }
 
-//Lets the current user pay part (or all) of their outstanding debt.
+//Lets the current user pay part (or all) of their outstanding debt using their balance.
 //On success the receipt text is returned in receiptText.
 //On failure nothing is changed and errorMessage explains why.
 bool ProcessDebtPayment(long long paymentAmount, std::string& receiptText, std::string& errorMessage){
@@ -456,6 +467,7 @@ bool ProcessDebtPayment(long long paymentAmount, std::string& receiptText, std::
     receiptText += "Customer: " + currentUser + "\r\n";
     receiptText += "Transaction: Debt Payment\r\n";
     receiptText += "Amount Paid: P" + FormatCartPrice(paymentAmount) + "\r\n";
+    receiptText += "Updated Balance: P" + FormatCartPrice(user.curUserBalance) + "\r\n";
     receiptText += "Outstanding Debt: P" + FormatCartPrice(user.curUserOutstandingDebt) + "\r\n";
     receiptText += "Remaining Credit: P" + FormatCartPrice(GetRemainingCredit(user)) + "\r\n";
     receiptText += "Status: Successful\r\n";
@@ -1342,6 +1354,7 @@ LRESULT CALLBACK PayDebtWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
 
                 //Show the new credit numbers, then the receipt (Continue returns to this window)
                 UpdateCreditInfoLabels(hwnd);
+                UpdatePayDebtBalanceText(hwnd);
                 SetDlgItemTextA(hwnd, ID_PAY_DEBT_AMOUNT_EDIT, "");
                 HWND receiptWindow = CreateReceiptWindow(GetModuleHandle(nullptr), receiptText, hwnd);
                 if (receiptWindow) {
@@ -2295,12 +2308,24 @@ HWND CreatePayDebtWindow(HINSTANCE hInstance, HWND moreWindow){
 
 void CreatePayDebtForm(HWND parent, HINSTANCE hInstance){
     CreateCreditInfoLabels(parent, hInstance, 55, 20);
+    CreateWindowExA(
+        0,
+        "STATIC",
+        "",
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        55, 110, 300, 25,
+        parent,
+        (HMENU)ID_PAY_DEBT_BALANCE_TEXT,
+        hInstance,
+        nullptr
+    );
+    UpdatePayDebtBalanceText(parent);
     CreateWindowEx(
         0,
         TEXT("STATIC"),
         TEXT("Payment (P):"),
         WS_CHILD | WS_VISIBLE | SS_LEFT,
-        55, 135, 100, 28,
+        55, 155, 100, 28,
         parent,
         nullptr,
         hInstance,
@@ -2311,7 +2336,7 @@ void CreatePayDebtForm(HWND parent, HINSTANCE hInstance){
         TEXT("EDIT"),
         TEXT(""),
         WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL,
-        160, 130, 190, 30,
+        160, 150, 190, 30,
         parent,
         (HMENU)ID_PAY_DEBT_AMOUNT_EDIT,
         hInstance,
@@ -2322,7 +2347,7 @@ void CreatePayDebtForm(HWND parent, HINSTANCE hInstance){
         TEXT("BUTTON"),
         TEXT("Pay Debt"),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-        145, 195, 100, 35,
+        145, 215, 100, 35,
         parent,
         (HMENU)ID_PAY_DEBT_SUBMIT_BUTTON,
         hInstance,
@@ -2333,7 +2358,7 @@ void CreatePayDebtForm(HWND parent, HINSTANCE hInstance){
         TEXT("BUTTON"),
         TEXT("Back"),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-        255, 195, 90, 35,
+        255, 215, 90, 35,
         parent,
         (HMENU)ID_PAY_DEBT_BACK_BUTTON,
         hInstance,
@@ -2358,6 +2383,16 @@ void CreateCreditInfoLabels(HWND parent, HINSTANCE hInstance, int x, int y){
         );
     }
     UpdateCreditInfoLabels(parent);
+}
+
+//Shows the current user's cash balance on the Pay Debt screen
+void UpdatePayDebtBalanceText(HWND parent){
+    auto userDetails = userInformationMap.find(currentUser);
+    if (userDetails == userInformationMap.end()) {
+        return;
+    }
+    const std::string balanceText = "Your Balance: P" + FormatCartPrice(userDetails->second.curUserBalance);
+    SetDlgItemTextA(parent, ID_PAY_DEBT_BALANCE_TEXT, balanceText.c_str());
 }
 
 //Refreshes the three credit lines with the current user's latest numbers

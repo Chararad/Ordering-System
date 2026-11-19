@@ -13,7 +13,7 @@ All data is saved in plain `.txt` files inside the `Main` folder, so no database
 - Cart: add items, change quantities (+ / -), see the total
 - Checkout with **Cash** or **Credit**
 - Deposit money into the account balance
-- **Pay Debt** (More > Pay Debt): pay back credit purchases
+- **Pay Debt** (More > Pay Debt): pay back credit purchases using the account balance
 - Receipts for orders, deposits and debt payments
 - Transaction history (double-click a receipt to open it)
 - Profile page (username, password, balance, purchases, credit limit, debt, remaining credit)
@@ -49,7 +49,7 @@ Everything is in `Main/orderSystem.cpp`.
 | `GetCartTotal` | Adds up the cart items |
 | `PayWithCash` | Checks the balance and deducts the total |
 | `PayWithCredit` | Checks the remaining credit and adds the total to the debt |
-| `PayDebt` | Lowers the debt (rejects 0 and amounts above the debt) |
+| `PayDebt` | Takes the payment from the balance and lowers the debt (rejects 0, amounts above the debt, and amounts above the balance) |
 | `ProcessCheckout` | Full checkout: pay, make the receipt, save files, update history, empty the cart |
 | `ProcessDebtPayment` | Full debt payment: pay, make the receipt, save files, update history |
 
@@ -82,9 +82,9 @@ Outstanding Debt: 0
 
 **Outstanding debt** – the total of credit purchases that were not paid yet (`curUserOutstandingDebt`).
 
-**Debt repayment** – More > Pay Debt. The customer types an amount (full or partial). The amount is subtracted from the debt, so the same amount of credit becomes available again. The customer cannot pay more than the debt. A debt payment does not use the cash balance; it is treated as paid separately (for example at the counter).
+**Debt repayment** – More > Pay Debt. The customer types an amount (full or partial). The amount is deducted from the cash balance (`curUserBalance`) and subtracted from the debt, so the same amount of credit becomes available again. The customer cannot pay more than the debt, and cannot pay more than their balance (they must deposit first).
 
-**Information shown** – Credit Limit, Outstanding Debt and Remaining Credit appear on the Checkout screen, the Pay Debt screen and the Profile page. There are no due dates and no interest.
+**Information shown** – Credit Limit, Outstanding Debt and Remaining Credit appear on the Checkout screen, the Pay Debt screen and the Profile page (the Pay Debt screen also shows the balance). There are no due dates and no interest.
 
 ## Important Code Logic
 
@@ -116,9 +116,15 @@ else  user.curUserOutstandingDebt += totalAmount;
 if (paymentAmount <= 0)                              -> reject
 if (user.curUserOutstandingDebt <= 0)                -> reject (no debt)
 if (paymentAmount > user.curUserOutstandingDebt)     -> reject (paying too much)
-else  user.curUserOutstandingDebt -= paymentAmount;
+if (user.curUserBalance < paymentAmount)             -> reject (not enough balance)
+else {
+    user.curUserBalance -= paymentAmount;
+    user.curUserOutstandingDebt -= paymentAmount;
+}
 ```
-Example: debt 4,000, pay 1,500 -> debt 2,500, remaining credit 7,500. Pay 2,500 more -> debt 0, remaining credit 10,000. Paying 2,501 would be rejected.
+- Balance 2,000, debt 4,000, pay 1,500 -> balance 500, debt 2,500, remaining credit 7,500.
+- Balance 500, debt 2,500, pay 2,500 -> rejected (balance too low). After depositing 2,500 more, paying 2,500 -> debt 0, remaining credit 10,000.
+- Debt 2,000, pay 2,001 -> rejected (more than the debt).
 
 **Safe saving** – `ProcessCheckout` and `ProcessDebtPayment` keep a copy of the account (`backupUser`) before charging. If saving a file fails, the copy is restored so the customer is never charged without a saved receipt.
 
@@ -136,4 +142,4 @@ Needs a Windows PC with MinGW g++ (for example MSYS2 UCRT64).
    ```
    orderSystem.exe
    ```
-4. Try it: log in with `Ches` / `12345` (or `User` / `123`), add flowers to the cart, check out with Cash or Credit, and use More > Pay Debt to repay credit purchases.
+4. Try it: log in with `Ches` / `12345` (or `User` / `123`), add flowers to the cart, check out with Cash or Credit, and use More > Pay Debt to repay credit purchases (deposit money first if the balance is low).
