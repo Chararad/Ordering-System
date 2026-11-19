@@ -1,0 +1,6 @@
+Username: user
+Password: 123
+Balance: 0
+Purchases: 0
+Credit Limit: 10000
+Outstanding Debt: 0
