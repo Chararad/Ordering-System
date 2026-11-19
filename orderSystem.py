@@ -12,7 +12,7 @@ Uses the same data layout as the C++ version, so existing data keeps working:
     Receipts/<user>/<receipt id>.txt       saved receipts (ORD- order, DEP- deposit, PAY- debt payment)
     AboutUs.txt, user.png                  About Us text, profile picture
 
-Optional: `pip install pillow` for better image scaling and the pink default tiles.
+Optional: `pip install pillow` for better image scaling and the cream default tiles.
 """
 
 import os
@@ -28,7 +28,8 @@ try:
 except ImportError:
     HAS_PIL = False
 
-BG = "#FFC0CB"
+BG = "#F6EFDD"          # light cream / beige background
+TILE = "#EADFC8"        # slightly darker cream (placeholder tiles)
 FG = "#501E32"
 FONT = "Segoe UI"
 
@@ -102,14 +103,14 @@ def load_photo(path, w, h):
 
 
 def default_tile(name, w, h):
-    """Pink placeholder tile with the product name (needs Pillow)."""
+    """Cream placeholder tile with the product name (needs Pillow)."""
     if not HAS_PIL:
         return None
-    img = Image.new("RGB", (w, h), "#A8556E")
+    img = Image.new("RGB", (w, h), "#B8A88A")
     draw = ImageDraw.Draw(img)
-    draw.rectangle([2, 2, w - 3, h - 3], fill="#FFE0E6")
-    draw.rectangle([5, 5, w - 6, h - 6], fill="#FFC0CB")
-    draw.text((16, h // 2 - 8), name[:18], fill="#64283C")
+    draw.rectangle([2, 2, w - 3, h - 3], fill=TILE)
+    draw.rectangle([5, 5, w - 6, h - 6], fill=BG)
+    draw.text((16, h // 2 - 8), name[:18], fill=FG)
     return ImageTk.PhotoImage(img)
 
 
@@ -673,30 +674,41 @@ class App(tk.Tk):
     def show_main_menu(self):
         s = self.store
         f = self.screen("Main Menu")
+        # Left column of buttons: Exit, Log Out, More
         self.btn(f, "Exit", self.destroy).place(x=10, y=10, width=90, height=30)
         self.btn(f, "Log Out", self.logout).place(x=10, y=50, width=90, height=30)
-        self.btn(f, "More", self.show_more).place(x=10, rely=1, y=-45, width=90, height=30)
+        self.btn(f, "More", self.show_more).place(x=10, y=90, width=90, height=30)
 
+        # Right column of buttons: Cart, Deposit
+        self.btn(f, "Cart", self.show_cart).place(relx=1, x=-100, y=10, width=90, height=30)
+        self.btn(f, "Deposit", self.open_deposit).place(relx=1, x=-100, y=50, width=90, height=30)
+
+        # Centre: welcome text, title and balance
         self.lbl(f, f"Welcome Back, {s.current}!", 14, True, "center").place(
             relx=0.5, x=-200, y=10, width=400, height=30)
         self.lbl(f, "FLOWER SHOP CATALOG", 22, True, "center").place(
             relx=0.5, x=-220, y=40, width=440, height=40)
+        self.lbl(f, f"BALANCE: {money(s.account['balance'])}", 12, True, "center").place(
+            relx=0.5, x=-200, y=84, width=400, height=28)
 
-        self.btn(f, "Cart", self.show_cart).place(relx=1, x=-170, y=10, width=90, height=30)
-        self.lbl(f, f"BALANCE: {money(s.account['balance'])}", 12, True).place(
-            relx=1, x=-210, y=50, width=200, height=30)
-        self.btn(f, "Deposit", self.open_deposit).place(relx=1, x=-170, y=80, width=90, height=25)
-
+        # The product grid starts below the button columns so nothing overlaps
         view = tk.Frame(f, bg=BG)
-        view.place(relx=0.5, x=-335, y=110, width=670, relheight=1, height=-130)
+        view.place(relx=0.5, x=-335, y=125, width=670, relheight=1, height=-145)
         canvas = tk.Canvas(view, bg=BG, highlightthickness=0)
         scrollbar = ttk.Scrollbar(view, orient="vertical", command=canvas.yview)
         canvas.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
         canvas.pack(side="left", fill="both", expand=True)
         inner = tk.Frame(canvas, bg=BG)
-        canvas.create_window((0, 0), window=inner, anchor="nw")
-        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        inner_id = canvas.create_window((0, 0), window=inner, anchor="n")
+
+        def center_grid(event=None):
+            """Keep the product grid centred and the scroll area the right size."""
+            canvas.coords(inner_id, canvas.winfo_width() // 2, 0)
+            canvas.configure(scrollregion=(0, 0, canvas.winfo_width(), inner.winfo_reqheight()))
+
+        canvas.bind("<Configure>", center_grid)
+        inner.bind("<Configure>", center_grid)
         self.scroll_canvas = canvas
 
         buttons = []
@@ -772,7 +784,7 @@ class App(tk.Tk):
             pic = tk.Label(f, image=photo, bg=BG)
             pic.image = photo
         else:
-            pic = tk.Label(f, text=name, bg="#FFE0E6", fg=FG, relief="ridge", bd=2,
+            pic = tk.Label(f, text=name, bg=TILE, fg=FG, relief="ridge", bd=2,
                            wraplength=260, font=(FONT, 14, "bold"))
         self.place_c(pic, 40, 90, 300, 300)
 
@@ -814,7 +826,7 @@ class App(tk.Tk):
         self.back_btn(f, self.show_main_menu)
 
         box = tk.Frame(f)
-        box.place(x=35, y=60, relwidth=1, width=-70, relheight=1, height=-185)
+        box.place(x=35, y=60, relwidth=1, width=-70, relheight=1, height=-190)   # leaves room for the buttons below
         box.grid_rowconfigure(0, weight=1)
         box.grid_columnconfigure(0, weight=1)
         lb = tk.Listbox(box, exportselection=False, activestyle="none")
@@ -850,11 +862,11 @@ class App(tk.Tk):
             else:
                 self.show_checkout()
 
-        self.btn(f, "-", lambda: change(-1)).place(x=35, rely=1, y=-165, width=45, height=35)
-        self.btn(f, "+", lambda: change(1)).place(x=90, rely=1, y=-165, width=45, height=35)
-        tk.Label(f, textvariable=total_var, bg=BG, fg=FG, anchor="w",
-                 font=(FONT, 11)).place(relx=1, x=-255, rely=1, y=-160, width=210, height=30)
-        self.btn(f, "Check Out", checkout).place(relx=1, x=-145, rely=1, y=-115, width=130, height=40)
+        self.btn(f, "-", lambda: change(-1)).place(x=35, rely=1, y=-115, width=45, height=35)
+        self.btn(f, "+", lambda: change(1)).place(x=90, rely=1, y=-115, width=45, height=35)
+        tk.Label(f, textvariable=total_var, bg=BG, fg=FG, anchor="e",
+                 font=(FONT, 12, "bold")).place(relx=1, x=-245, rely=1, y=-115, width=210, height=35)
+        self.btn(f, "Check Out", checkout).place(relx=1, x=-165, rely=1, y=-65, width=130, height=40)
         refresh()
 
     def show_checkout(self):
@@ -956,7 +968,7 @@ class App(tk.Tk):
         self.place_c(self.lbl(f, f"Password: {acct['password']}"), 300, 340, 300, 30)
         self.place_c(self.lbl(f, f"Balance: {money(acct['balance'])}"), 300, 380, 300, 30)
         self.place_c(self.lbl(f, f"Purchases: {acct['purchases']}"), 300, 420, 400, 30)
-        self.credit_info(f, 300, 452, gap=25)   # tighter, so it fits in the smallest window
+        self.credit_info(f, 300, 446, gap=24)   # tighter, so it fits in the smallest window
 
     def show_history(self):
         f = self.screen("Transaction History")
